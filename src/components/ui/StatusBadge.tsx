@@ -7,16 +7,16 @@ interface StatusBadgeProps {
 }
 
 function statusClass(status: string): string {
-  if (['normal', 'success', 'checked', 'closed'].includes(status)) {
+  if (['normal', 'success', 'checked', 'closed', 'active'].includes(status)) {
     return 'border-success/25 bg-success/10 text-success';
   }
-  if (['warning', 'partial', 'maintenance', 'cooldown'].includes(status)) {
+  if (['warning', 'partial', 'maintenance', 'cooldown', 'inactive', 'expiring'].includes(status)) {
     return 'border-warning/30 bg-warning/12 text-warning';
   }
-  if (['failed', 'offline', 'unavailable', 'unchecked', 'open'].includes(status)) {
+  if (['failed', 'offline', 'unavailable', 'unchecked', 'open', 'blocked'].includes(status)) {
     return 'border-danger/30 bg-danger/12 text-danger';
   }
-  if (status === 'disabled') {
+  if (['disabled', 'expired', 'unused'].includes(status)) {
     return 'border-line bg-elevated text-muted';
   }
   return 'border-info/25 bg-info/10 text-info';

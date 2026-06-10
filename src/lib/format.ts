@@ -36,6 +36,12 @@ export function statusText(status: string): string {
     unchecked: '未签到',
     disabled: '已禁用',
     success: '成功',
+    active: '活跃',
+    inactive: '待激活',
+    blocked: '已停用',
+    expiring: '即将过期',
+    expired: '已过期',
+    unused: '从未使用',
   };
 
   return map[status] ?? status;

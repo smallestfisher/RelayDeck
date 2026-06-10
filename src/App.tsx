@@ -8,6 +8,8 @@ import { OverviewPage } from './pages/OverviewPage';
 import { RoutingPage } from './pages/RoutingPage';
 import { SitesPage } from './pages/SitesPage';
 import { TestPage } from './pages/TestPage';
+import { UsersPage } from './pages/UsersPage';
+import { ApiKeysPage } from './pages/ApiKeysPage';
 import type { PageId, ThemeMode } from './types';
 
 const pageTitles: Record<PageId, string> = {
@@ -18,6 +20,8 @@ const pageTitles: Record<PageId, string> = {
   checkin: '签到中心',
   quota: '额度管理',
   testing: '调用测试',
+  users: '用户管理',
+  apiKeys: 'API Keys',
   logs: '任务日志',
   settings: '系统设置',
 };
@@ -51,6 +55,8 @@ export default function App() {
     if (activePage === 'routing') return <RoutingPage />;
     if (activePage === 'checkin' || activePage === 'quota') return <CheckinQuotaPage />;
     if (activePage === 'testing') return <TestPage />;
+    if (activePage === 'users') return <UsersPage />;
+    if (activePage === 'apiKeys') return <ApiKeysPage />;
 
     return (
       <EmptyPage

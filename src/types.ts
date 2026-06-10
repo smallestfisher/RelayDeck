@@ -8,6 +8,8 @@ export type PageId =
   | 'checkin'
   | 'quota'
   | 'testing'
+  | 'users'
+  | 'apiKeys'
   | 'logs'
   | 'settings';
 
@@ -15,6 +17,10 @@ export type SiteStatus = 'normal' | 'warning' | 'failed' | 'maintenance' | 'offl
 export type ModelStatus = 'normal' | 'partial' | 'unavailable';
 export type CheckinStatus = 'checked' | 'unchecked' | 'disabled';
 export type TestStatus = 'success' | 'partial' | 'failed';
+export type UserRole = 'super_admin' | 'admin' | 'developer' | 'viewer';
+export type UserStatus = 'active' | 'inactive' | 'blocked';
+export type ApiKeyStatus = 'active' | 'expiring' | 'blocked' | 'expired' | 'unused';
+export type ApiKeyScope = 'Chat' | 'Embedding' | 'Vision' | 'Admin';
 export type AlertSeverity = 'info' | 'warning' | 'danger' | 'success';
 export type SiteType = 'OpenAI 兼容' | 'Claude' | 'Gemini' | 'Azure OpenAI';
 export type Capability = 'stream' | 'function' | 'vision' | 'embedding';
@@ -138,4 +144,59 @@ export interface TestResultRow {
   error?: string;
   supports: Record<Capability, boolean>;
   testedAt: string;
+}
+
+export interface UserActivity {
+  id: string;
+  type: 'login' | 'key' | 'role' | 'quota';
+  title: string;
+  description: string;
+  time: string;
+}
+
+export interface UserRecord {
+  id: string;
+  name: string;
+  email: string;
+  avatarText: string;
+  role: UserRole;
+  status: UserStatus;
+  organization: string;
+  note: string;
+  availableModels: string[];
+  apiKeyCount: number;
+  monthlyQuotaUsd: number;
+  usedQuotaUsd: number;
+  rateLimit: string;
+  joinedAt: string;
+  lastLogin: string;
+  activity: UserActivity[];
+}
+
+export interface ApiKeyCall {
+  id: string;
+  endpoint: string;
+  statusCode: number;
+  time: string;
+}
+
+export interface ApiKeyRecord {
+  id: string;
+  name: string;
+  ownerName: string;
+  ownerEmail: string;
+  prefix: string;
+  maskedKey: string;
+  scopes: ApiKeyScope[];
+  allowedModels: string[];
+  rateLimit: string;
+  dailyLimit: string;
+  ipWhitelist: string;
+  createdAt: string;
+  expiresAt: string;
+  lastUsed: string;
+  status: ApiKeyStatus;
+  usageTokens: number;
+  usagePercent: number;
+  recentCalls: ApiKeyCall[];
 }

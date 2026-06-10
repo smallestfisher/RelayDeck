@@ -2,11 +2,13 @@ import {
   CalendarCheck,
   ClipboardList,
   FlaskConical,
+  KeyRound,
   LayoutDashboard,
   PanelLeftClose,
   Route,
   Server,
   Settings,
+  Users,
   WalletCards,
   Boxes,
 } from 'lucide-react';
@@ -27,6 +29,8 @@ const navItems: Array<{ id: PageId; label: string; icon: typeof LayoutDashboard 
   { id: 'checkin', label: '签到中心', icon: CalendarCheck },
   { id: 'quota', label: '额度管理', icon: WalletCards },
   { id: 'testing', label: '调用测试', icon: FlaskConical },
+  { id: 'users', label: '用户管理', icon: Users },
+  { id: 'apiKeys', label: 'API Keys', icon: KeyRound },
   { id: 'logs', label: '任务日志', icon: ClipboardList },
   { id: 'settings', label: '系统设置', icon: Settings },
 ];
