@@ -10,7 +10,7 @@ import { SitesPage } from './pages/SitesPage';
 import { TestPage } from './pages/TestPage';
 import { UsersPage } from './pages/UsersPage';
 import { ApiKeysPage } from './pages/ApiKeysPage';
-import type { PageId, ThemeMode } from './types';
+import type { AdminUser, PageId, ThemeMode } from './types';
 
 const pageTitles: Record<PageId, string> = {
   overview: '概览',
@@ -34,7 +34,8 @@ function readInitialTheme(): ThemeMode {
 export default function App() {
   const [theme, setTheme] = useState<ThemeMode>(readInitialTheme);
   const [activePage, setActivePage] = useState<PageId>('overview');
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [adminUser, setAdminUser] = useState<AdminUser | null>(null);
+  const [authChecked, setAuthChecked] = useState(false);
   const title = useMemo(() => pageTitles[activePage], [activePage]);
 
   useEffect(() => {
@@ -42,10 +43,49 @@ export default function App() {
     window.localStorage.setItem('relaydeck-theme', theme);
   }, [theme]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    async function restoreSession() {
+      try {
+        const response = await fetch('/api/admin/auth/me', { credentials: 'include' });
+        if (!response.ok) return;
+        const payload = (await response.json()) as { user?: AdminUser };
+        if (!cancelled && payload.user) {
+          setAdminUser(payload.user);
+        }
+      } catch {
+        // Staying on the login page is the correct fallback when the backend is unavailable.
+      } finally {
+        if (!cancelled) {
+          setAuthChecked(true);
+        }
+      }
+    }
+
+    restoreSession();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const toggleTheme = () => setTheme((current) => (current === 'dark' ? 'light' : 'dark'));
 
-  if (!isAuthenticated) {
-    return <LoginPage theme={theme} onThemeToggle={toggleTheme} onLogin={() => setIsAuthenticated(true)} />;
+  async function handleLogout() {
+    try {
+      await fetch('/api/admin/auth/logout', { method: 'POST', credentials: 'include' });
+    } finally {
+      setAdminUser(null);
+      setActivePage('overview');
+    }
+  }
+
+  if (!authChecked) {
+    return <main className="flex min-h-screen items-center justify-center bg-app text-sm text-muted">正在检查登录状态...</main>;
+  }
+
+  if (!adminUser) {
+    return <LoginPage theme={theme} onThemeToggle={toggleTheme} onLogin={setAdminUser} />;
   }
 
   function renderPage() {
@@ -71,8 +111,10 @@ export default function App() {
     <AppLayout
       activePage={activePage}
       theme={theme}
+      user={adminUser}
       onThemeToggle={toggleTheme}
       onPageChange={setActivePage}
+      onLogout={handleLogout}
     >
       {renderPage()}
     </AppLayout>

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/smallestfisher/relaydeck/backend/internal/auth"
 	"github.com/smallestfisher/relaydeck/backend/internal/config"
 	"github.com/smallestfisher/relaydeck/backend/internal/http/admin"
 	"github.com/smallestfisher/relaydeck/backend/internal/http/gateway"
@@ -14,9 +15,10 @@ import (
 
 func New(cfg config.Config) http.Handler {
 	mux := http.NewServeMux()
-	memoryStore := store.NewMemoryStore()
+	memoryStore := store.NewMemoryStoreWithBootstrap(cfg.BootstrapOwnerEmail, cfg.BootstrapOwnerPassword)
+	sessions := auth.NewMemorySessionStore(time.Now)
 	gatewayHandler := gateway.New(memoryStore, upstream.NewClient(cfg.GatewayRequestTimeout), time.Now)
-	adminHandler := admin.New(memoryStore)
+	adminHandler := admin.New(memoryStore, sessions, time.Now)
 
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")

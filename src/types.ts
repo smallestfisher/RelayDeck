@@ -1,5 +1,12 @@
 export type ThemeMode = 'dark' | 'light';
 
+export interface AdminUser {
+  id: string;
+  email: string;
+  role: 'owner' | 'admin' | 'developer' | 'viewer';
+  status: 'active' | 'inactive' | 'blocked';
+}
+
 export type PageId =
   | 'overview'
   | 'sites'

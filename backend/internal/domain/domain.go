@@ -38,6 +38,33 @@ const (
 	APIKeyStatusExpired APIKeyStatus = "expired"
 )
 
+type UserRole string
+
+const (
+	UserRoleOwner     UserRole = "owner"
+	UserRoleAdmin     UserRole = "admin"
+	UserRoleDeveloper UserRole = "developer"
+	UserRoleViewer    UserRole = "viewer"
+)
+
+type UserStatus string
+
+const (
+	UserStatusActive   UserStatus = "active"
+	UserStatusInactive UserStatus = "inactive"
+	UserStatusBlocked  UserStatus = "blocked"
+)
+
+type User struct {
+	ID           string
+	Email        string
+	PasswordHash string
+	Role         UserRole
+	Status       UserStatus
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+}
+
 type APIKey struct {
 	ID              string
 	UserID          string

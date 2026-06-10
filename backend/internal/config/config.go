@@ -6,16 +6,20 @@ import (
 )
 
 type Config struct {
-	HTTPAddr              string
-	AppSecret             string
-	GatewayRequestTimeout time.Duration
+	HTTPAddr               string
+	AppSecret              string
+	GatewayRequestTimeout  time.Duration
+	BootstrapOwnerEmail    string
+	BootstrapOwnerPassword string
 }
 
 func Load() Config {
 	return Config{
-		HTTPAddr:              envOrDefault("HTTP_ADDR", ":8080"),
-		AppSecret:             envOrDefault("APP_SECRET", "dev-secret"),
-		GatewayRequestTimeout: durationOrDefault("GATEWAY_REQUEST_TIMEOUT", 30*time.Second),
+		HTTPAddr:               envOrDefault("HTTP_ADDR", ":8080"),
+		AppSecret:              envOrDefault("APP_SECRET", "dev-secret"),
+		GatewayRequestTimeout:  durationOrDefault("GATEWAY_REQUEST_TIMEOUT", 30*time.Second),
+		BootstrapOwnerEmail:    envOrDefault("APP_BOOTSTRAP_OWNER_EMAIL", "owner@example.com"),
+		BootstrapOwnerPassword: envOrDefault("APP_BOOTSTRAP_OWNER_PASSWORD", "change-me"),
 	}
 }
 

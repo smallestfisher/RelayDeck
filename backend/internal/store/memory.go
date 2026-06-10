@@ -9,15 +9,51 @@ import (
 
 const DevAPIKeySecret = "rd_live_dev_test_secret"
 
+const (
+	DefaultOwnerEmail    = "owner@example.com"
+	DefaultOwnerPassword = "change-me"
+)
+
 type MemoryStore struct {
+	users    []domain.User
 	apiKeys  []domain.APIKey
 	models   []domain.Model
 	sites    []domain.UpstreamSite
 	mappings []domain.SiteModel
 }
 
+func mustHashPassword(password string) string {
+	hash, err := auth.HashPassword(password)
+	if err != nil {
+		panic(err)
+	}
+	return hash
+}
+
 func NewMemoryStore() *MemoryStore {
+	return NewMemoryStoreWithBootstrap(DefaultOwnerEmail, DefaultOwnerPassword)
+}
+
+func NewMemoryStoreWithBootstrap(ownerEmail string, ownerPassword string) *MemoryStore {
+	if ownerEmail == "" {
+		ownerEmail = DefaultOwnerEmail
+	}
+	if ownerPassword == "" {
+		ownerPassword = DefaultOwnerPassword
+	}
+	now := time.Now()
 	return &MemoryStore{
+		users: []domain.User{
+			{
+				ID:           "user_admin",
+				Email:        ownerEmail,
+				PasswordHash: mustHashPassword(ownerPassword),
+				Role:         domain.UserRoleOwner,
+				Status:       domain.UserStatusActive,
+				CreatedAt:    now,
+				UpdatedAt:    now,
+			},
+		},
 		apiKeys: []domain.APIKey{
 			{
 				ID:              "key_dev",
@@ -27,7 +63,7 @@ func NewMemoryStore() *MemoryStore {
 				Status:          domain.APIKeyStatusActive,
 				Scopes:          []domain.Scope{domain.ScopeChatCompletions, domain.ScopeResponses},
 				AllowedModels:   []string{"gpt-4o-mini", "gpt-4o"},
-				ExpiresAt:       time.Now().AddDate(10, 0, 0),
+				ExpiresAt:       now.AddDate(10, 0, 0),
 				OwnerIsActive:   true,
 				RPM:             120,
 				TPM:             60000,
@@ -68,6 +104,28 @@ func NewMemoryStore() *MemoryStore {
 
 func (s *MemoryStore) APIKeys() []domain.APIKey {
 	return append([]domain.APIKey(nil), s.apiKeys...)
+}
+
+func (s *MemoryStore) Users() []domain.User {
+	return append([]domain.User(nil), s.users...)
+}
+
+func (s *MemoryStore) UserByEmail(email string) (domain.User, bool) {
+	for _, user := range s.users {
+		if user.Email == email {
+			return user, true
+		}
+	}
+	return domain.User{}, false
+}
+
+func (s *MemoryStore) UserByID(id string) (domain.User, bool) {
+	for _, user := range s.users {
+		if user.ID == id {
+			return user, true
+		}
+	}
+	return domain.User{}, false
 }
 
 func (s *MemoryStore) Models() []domain.Model {

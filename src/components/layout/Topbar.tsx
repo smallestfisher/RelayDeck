@@ -1,13 +1,17 @@
-import { Bell, ChevronDown, Moon, RefreshCw, Search, Sun } from 'lucide-react';
-import type { ThemeMode } from '../../types';
+import { Bell, ChevronDown, LogOut, Moon, RefreshCw, Search, Sun } from 'lucide-react';
+import type { AdminUser, ThemeMode } from '../../types';
 import { Button } from '../ui/Button';
 
 interface TopbarProps {
   theme: ThemeMode;
+  user: AdminUser;
   onThemeToggle: () => void;
+  onLogout: () => void;
 }
 
-export function Topbar({ theme, onThemeToggle }: TopbarProps) {
+export function Topbar({ theme, user, onThemeToggle, onLogout }: TopbarProps) {
+  const avatarText = user.email.slice(0, 1).toUpperCase();
+
   return (
     <header className="sticky top-0 z-20 flex h-[68px] items-center justify-between border-b border-line bg-app/82 px-8 backdrop-blur-xl">
       <div className="relative w-full max-w-[380px]">
@@ -59,13 +63,16 @@ export function Topbar({ theme, onThemeToggle }: TopbarProps) {
         <Button variant="icon" aria-label="刷新">
           <RefreshCw className="h-5 w-5" />
         </Button>
-        <button type="button" className="flex items-center gap-3 text-sm font-medium text-text">
+        <button type="button" className="flex items-center gap-3 text-sm font-medium text-text" title={user.email}>
           <span className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-slate-300 to-slate-600 text-sm text-white">
-            管
+            {avatarText}
           </span>
-          管理员
+          <span className="max-w-[150px] truncate">{user.email}</span>
           <ChevronDown className="h-4 w-4 text-muted" />
         </button>
+        <Button variant="icon" aria-label="退出登录" title="退出登录" onClick={onLogout}>
+          <LogOut className="h-5 w-5" />
+        </Button>
       </div>
     </header>
   );

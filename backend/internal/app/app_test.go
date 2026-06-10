@@ -3,6 +3,7 @@ package app
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/smallestfisher/relaydeck/backend/internal/config"
@@ -24,7 +25,7 @@ func TestHealthzReturnsOK(t *testing.T) {
 	}
 }
 
-func TestAdminSummaryRouteIsMounted(t *testing.T) {
+func TestAdminSummaryRequiresSession(t *testing.T) {
 	handler := New(config.Config{})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/summary", nil)
@@ -32,7 +33,33 @@ func TestAdminSummaryRouteIsMounted(t *testing.T) {
 
 	handler.ServeHTTP(rec, req)
 
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected status 401, got %d", rec.Code)
+	}
+}
+
+func TestAdminSummaryRouteIsMountedForLoggedInUser(t *testing.T) {
+	handler := New(config.Config{BootstrapOwnerEmail: "owner@example.com", BootstrapOwnerPassword: "change-me"})
+	loginReq := httptest.NewRequest(http.MethodPost, "/api/admin/auth/login", strings.NewReader(`{"email":"owner@example.com","password":"change-me"}`))
+	loginReq.Header.Set("Content-Type", "application/json")
+	loginRec := httptest.NewRecorder()
+
+	handler.ServeHTTP(loginRec, loginReq)
+
+	if loginRec.Code != http.StatusOK {
+		t.Fatalf("expected login status 200, got %d: %s", loginRec.Code, loginRec.Body.String())
+	}
+	cookies := loginRec.Result().Cookies()
+	if len(cookies) == 0 {
+		t.Fatal("expected login to set a session cookie")
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/admin/summary", nil)
+	req.AddCookie(cookies[0])
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
 	if rec.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d", rec.Code)
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
