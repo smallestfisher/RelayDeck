@@ -10,6 +10,7 @@ type Config struct {
 	AppSecret              string
 	DatabaseURL            string
 	RedisURL               string
+	UpstreamSecretKey      string
 	GatewayRequestTimeout  time.Duration
 	BootstrapOwnerEmail    string
 	BootstrapOwnerPassword string
@@ -22,6 +23,7 @@ func Load() Config {
 		AppSecret:              envOrDefault("APP_SECRET", "dev-secret"),
 		DatabaseURL:            envOrDefault("DATABASE_URL", ""),
 		RedisURL:               envOrDefault("REDIS_URL", ""),
+		UpstreamSecretKey:      envOrDefault("APP_UPSTREAM_SECRET_KEY", "0123456789abcdef0123456789abcdef"),
 		GatewayRequestTimeout:  durationOrDefault("GATEWAY_REQUEST_TIMEOUT", 30*time.Second),
 		BootstrapOwnerEmail:    envOrDefault("APP_BOOTSTRAP_OWNER_EMAIL", "owner@example.com"),
 		BootstrapOwnerPassword: envOrDefault("APP_BOOTSTRAP_OWNER_PASSWORD", "change-me"),
