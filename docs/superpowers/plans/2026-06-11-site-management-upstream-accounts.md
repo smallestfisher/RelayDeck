@@ -299,17 +299,21 @@
 
 **Status**
 
-- In progress.
-- Completed:
+- Completed.
+- Verified with:
   - `cd backend && GOCACHE=/tmp/go-build go test ./...`
   - `npm run build`
-  - `git status --short` before this status update was clean.
-- Pending:
-  - Start backend and frontend dev servers.
-  - Browser-check login and navigation to `站点管理`.
-  - Browser-check no 2FA/TOTP controls are present.
-  - Browser-check missing account credentials show as `未配置`, unsupported check-in shows as `不支持`, and human verification states show as `需人工处理`.
-- Remote push remains intentionally deferred until final feature verification and user confirmation.
+  - backend dev server on `http://localhost:8080/healthz`
+  - frontend dev server on `http://localhost:5173/`
+  - Vite proxy request to `GET /api/admin/upstreams/accounts`
+  - user browser check for login and navigation to `站点管理`
+- Confirmed behavior:
+  - no 2FA/TOTP controls in the site management page
+  - missing account credentials display as `未配置`
+  - unsupported check-in displays as `不支持`
+  - human verification states are represented as `需人工处理`
+- Remote push remains intentionally deferred until user confirmation.
+- Future UI checks on this small server should avoid Chrome headless due to memory overhead; use manual browser checks unless explicitly requested.
 
 **Remote Push**
 
