@@ -28,8 +28,8 @@ RelayDeck 是一个统一管理多个大模型站点（基于 new-api 或 sub2ap
 ### 后端
 - **语言**: Go
 - **HTTP**: 标准库 `net/http`
-- **数据库**: PostgreSQL 作为目标主存储，当前首个后端切片使用内存数据
-- **缓存**: Redis 后续用于分布式限流和共享熔断状态
+- **数据库**: PostgreSQL 作为主存储；当前已支持管理端用户持久化，网关配置仍保留内存 seed
+- **缓存**: Redis 用于管理端 session；后续继续承载分布式限流和共享熔断状态
 - **API**: OpenAI 兼容 `/v1/*` 网关 API + RelayDeck 管理端 `/api/admin/*`
 
 ## 项目结构
@@ -61,6 +61,24 @@ npm run dev
 
 访问 Vite 输出的本地地址，默认通常是 http://localhost:5173
 
+### 环境变量
+
+项目根目录提供 `.env.example` 作为唯一环境变量模板。本地开发或集成测试时复制为 `.env` 并填写真实值：
+
+```bash
+cp .env.example .env
+```
+
+`.env` 不提交到 Git。后端启动和 Go 集成测试会自动读取 `.env` 中的 `DATABASE_URL`、`REDIS_URL`、`APP_BOOTSTRAP_OWNER_EMAIL` 等变量。
+
+本地 PostgreSQL 和 Redis 使用 Docker Compose 启动：
+
+```bash
+docker compose up -d postgres redis
+```
+
+`docker-compose.yml` 默认使用镜像源地址，避免本地开发时直接拉取 Docker Hub 超时。
+
 ### 功能页面
 
 | 页面 | 功能 |
@@ -85,6 +103,12 @@ npm run dev
 - 💫 **流畅体验** - 热更新、平滑过渡动画
 - 📱 **响应式设计** - 适配不同屏幕尺寸
 
+## 工程原则
+
+- 默认采用业内主流、可生产演进的实现方式。
+- 本地内存 fallback 仅用于开发便利，生产路径应优先使用 PostgreSQL、Redis 等明确的基础设施。
+- 临时简化必须在文档或代码边界中标明，后续实施应优先替换为正式实现。
+
 ## 开发计划
 
 ### 已完成 ✅
@@ -97,7 +121,10 @@ npm run dev
 ### 进行中 🚧
 - [ ] 后端 API 开发
 - [x] 数据库设计草案
-- [ ] 用户认证系统
+- [x] 管理端登录/session MVP
+- [x] PostgreSQL 管理员用户持久化
+- [x] Redis session 存储
+- [ ] 网关配置持久化
 - [ ] 站点健康检查
 
 ### 计划中 📋

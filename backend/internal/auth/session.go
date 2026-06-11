@@ -18,9 +18,9 @@ type Session struct {
 }
 
 type SessionStore interface {
-	Create(session Session)
+	Create(session Session) error
 	Get(token string) (Session, bool)
-	Delete(token string)
+	Delete(token string) error
 }
 
 type MemorySessionStore struct {
@@ -44,10 +44,11 @@ func NewSessionToken() (string, error) {
 	return hex.EncodeToString(buf), nil
 }
 
-func (s *MemorySessionStore) Create(session Session) {
+func (s *MemorySessionStore) Create(session Session) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.data[session.Token] = session
+	return nil
 }
 
 func (s *MemorySessionStore) Get(token string) (Session, bool) {
@@ -64,8 +65,9 @@ func (s *MemorySessionStore) Get(token string) (Session, bool) {
 	return session, true
 }
 
-func (s *MemorySessionStore) Delete(token string) {
+func (s *MemorySessionStore) Delete(token string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.data, token)
+	return nil
 }

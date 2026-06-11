@@ -51,7 +51,10 @@ func (h *Handler) handleLogin(w http.ResponseWriter, r *http.Request) {
 		ExpiresAt:  h.now().Add(24 * time.Hour),
 		LastSeenAt: h.now(),
 	}
-	h.sessions.Create(session)
+	if err := h.sessions.Create(session); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "session_unavailable"})
+		return
+	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     "relaydeck_session",
 		Value:    token,
@@ -75,7 +78,7 @@ func (h *Handler) handleMe(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) handleLogout(w http.ResponseWriter, r *http.Request) {
 	cookie, err := r.Cookie("relaydeck_session")
 	if err == nil && cookie.Value != "" {
-		h.sessions.Delete(cookie.Value)
+		_ = h.sessions.Delete(cookie.Value)
 	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     "relaydeck_session",

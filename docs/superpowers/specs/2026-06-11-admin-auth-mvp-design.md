@@ -4,7 +4,7 @@ Date: 2026-06-11
 
 ## Context
 
-RelayDeck now has a Go backend slice for the OpenAI-compatible gateway and a root `src/` React prototype for the management console. The current gateway already uses RelayDeck-issued API keys for `/v1/*`, but the admin surface still has no real login/session boundary. The login page in `src/pages/LoginPage.tsx` is still a local prototype, and the old Ant Design `frontend/` app has been removed.
+RelayDeck now has a Go backend slice for the OpenAI-compatible gateway and a root `src/` React management console. The gateway uses RelayDeck-issued API keys for `/v1/*`; the admin surface uses email/password login, HttpOnly cookies, PostgreSQL-backed admin users, and Redis-backed sessions when configured.
 
 This milestone is about making the management console real enough to operate: an authenticated admin session, protected `/api/admin/*` endpoints, and a login page that talks to the backend. Registration stays invitation-only and is not opened to the public in this slice.
 
@@ -12,6 +12,8 @@ This milestone is about making the management console real enough to operate: an
 
 - Provide admin login, logout, and session lookup APIs.
 - Protect `/api/admin/*` with server-side session authentication.
+- Persist admin users in PostgreSQL when `DATABASE_URL` is configured.
+- Store admin sessions in Redis when `REDIS_URL` is configured.
 - Allow the root login page to restore a session on refresh and submit credentials to the backend.
 - Keep the admin user model aligned with the existing `users` table in `backend/migrations/0001_initial.sql`.
 - Preserve the current product direction: no public signup flow in this slice.
@@ -21,8 +23,8 @@ This milestone is about making the management console real enough to operate: an
 - No public registration endpoint.
 - No OAuth, SSO, MFA, or password reset flow.
 - No role management UI beyond the existing mock console pages.
-- No full PostgreSQL-backed auth repository yet.
-- No distributed session store or Redis-backed session sharing in this slice.
+- No persistence migration for gateway configuration, API keys, model mappings, logs, or usage aggregates in this slice.
+- No Redis-backed rate limiting or circuit breaker state in this slice.
 
 ## Authentication Model
 
@@ -32,7 +34,7 @@ Flow:
 
 1. The user submits email and password to `POST /api/admin/auth/login`.
 2. The backend verifies the password against the stored hash for the matching admin user.
-3. The backend creates a random session token and stores the session server-side.
+3. The backend creates a random session token and stores the session server-side. Redis is used when `REDIS_URL` is configured; memory is only the local fallback.
 4. The backend returns a minimal user payload and sets `relaydeck_session` as an HttpOnly cookie.
 5. The frontend calls `GET /api/admin/auth/me` on startup to restore the session.
 6. `POST /api/admin/auth/logout` invalidates the session and clears the cookie.
@@ -50,7 +52,7 @@ Recommended bootstrap inputs:
 
 Behavior:
 
-- If the user table is empty, the service seeds one active owner/admin user at startup.
+- If the PostgreSQL `users` table is empty, the service seeds one active owner/admin user at startup.
 - If the user table already has data, bootstrap seeding is skipped.
 - The bootstrap password is hashed before storage and never echoed back in API responses or logs.
 
@@ -64,9 +66,9 @@ Sessions are only for admin login and only authorize `/api/admin/*` routes.
 
 ## Data Model
 
-The existing `users` table remains the source of truth for admin identity.
+The existing `users` table remains the source of truth for admin identity when `DATABASE_URL` is configured.
 
-For the MVP, session state can live in memory with the following shape:
+Admin session state is stored in Redis when `REDIS_URL` is configured. Session records have this shape:
 
 - session token
 - user id
@@ -76,7 +78,19 @@ For the MVP, session state can live in memory with the following shape:
 - expires at
 - last seen at
 
-This is enough for a single-instance backend and keeps the implementation simple while preserving a path to a durable repository later.
+The memory store remains available only as a local development fallback when Redis or PostgreSQL are intentionally not configured.
+
+## Environment Management
+
+Environment variables are documented in `.env.example`. Developers copy it to `.env` for local development and integration tests. Backend startup and Go integration tests load `.env` automatically.
+
+Core variables:
+
+- `DATABASE_URL`
+- `REDIS_URL`
+- `APP_BOOTSTRAP_OWNER_EMAIL`
+- `APP_BOOTSTRAP_OWNER_PASSWORD`
+- `GATEWAY_REQUEST_TIMEOUT`
 
 ## Login Page Behavior
 
@@ -92,6 +106,7 @@ The root login page becomes a real entry point for the admin console.
 
 - Passwords are hashed before storage.
 - Sessions are opaque and server-side.
+- Production session storage should use Redis via `REDIS_URL`.
 - Session cookies are HttpOnly and same-site.
 - Login, logout, and session lookup never expose the password hash or session token.
 - Admin-only routes must reject missing or expired sessions with 401.
@@ -105,6 +120,8 @@ Backend tests should cover:
 
 - password hashing and verification
 - session creation, lookup, expiry, and logout
+- Redis session lifecycle with Docker-backed Redis
+- PostgreSQL owner bootstrap with Docker-backed PostgreSQL
 - login success and login failure
 - protected admin route rejection without a session
 - `/api/admin/auth/me` returning the current admin user
@@ -115,4 +132,3 @@ Frontend verification should cover:
 - session restoration on refresh works
 - logout returns the app to the login screen
 - register tab does not create a real account
-

@@ -41,7 +41,7 @@ func RequireAdminSession(next http.Handler, sessions auth.SessionStore, users Us
 			return
 		}
 		session.LastSeenAt = now()
-		sessions.Create(session)
+		_ = sessions.Create(session)
 		ctx := context.WithValue(r.Context(), adminUserContextKey{}, user)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
