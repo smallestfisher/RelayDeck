@@ -124,7 +124,10 @@ docker compose up -d postgres redis
 - [x] 管理端登录/session MVP
 - [x] PostgreSQL 管理员用户持久化
 - [x] Redis session 存储
+- [x] 平台账号聚合与原生协议路由设计
 - [ ] 网关配置持久化
+- [ ] new-api/sub2api 账号聚合和模型同步
+- [ ] 原生协议优先路由与协议转换
 - [ ] 站点健康检查
 
 ### 计划中 📋
