@@ -248,22 +248,22 @@ func (a UpstreamAccount) HasAccountCredential() bool {
 }
 
 type UpstreamAccountStatus struct {
-	UpstreamAccountID    string
-	APIStatus            UpstreamAPIStatus
-	AccountStatus        AccountCredentialStatus
-	CheckinStatus        UpstreamCheckinStatus
-	ModelCount           int
-	LatencyMS            int
-	BalanceAmount        float64
-	BalanceUnit          string
-	LastAPICheckedAt     time.Time
-	LastAccountCheckedAt time.Time
-	LastModelSyncedAt    time.Time
-	LastCheckinAt        time.Time
-	LastErrorClass       UpstreamErrorClass
-	LastErrorMessage     string
-	ActionRequiredReason string
-	UpdatedAt            time.Time
+	UpstreamAccountID    string                  `json:"upstream_account_id"`
+	APIStatus            UpstreamAPIStatus       `json:"api_status"`
+	AccountStatus        AccountCredentialStatus `json:"account_status"`
+	CheckinStatus        UpstreamCheckinStatus   `json:"checkin_status"`
+	ModelCount           int                     `json:"model_count"`
+	LatencyMS            int                     `json:"latency_ms"`
+	BalanceAmount        float64                 `json:"balance_amount"`
+	BalanceUnit          string                  `json:"balance_unit"`
+	LastAPICheckedAt     time.Time               `json:"last_api_checked_at"`
+	LastAccountCheckedAt time.Time               `json:"last_account_checked_at"`
+	LastModelSyncedAt    time.Time               `json:"last_model_synced_at"`
+	LastCheckinAt        time.Time               `json:"last_checkin_at"`
+	LastErrorClass       UpstreamErrorClass      `json:"last_error_class"`
+	LastErrorMessage     string                  `json:"last_error_message"`
+	ActionRequiredReason string                  `json:"action_required_reason"`
+	UpdatedAt            time.Time               `json:"updated_at"`
 }
 
 func (s UpstreamAccountStatus) CanRouteTraffic() bool {
@@ -275,29 +275,29 @@ func (s UpstreamAccountStatus) NeedsManualAction() bool {
 }
 
 type UpstreamSyncedModel struct {
-	ID                     string
-	UpstreamAccountID      string
-	NormalizedModelName    string
-	UpstreamModelName      string
-	DisplayName            string
-	NativeWireProtocol     Protocol
-	SupportedWireProtocols []Protocol
-	Capabilities           []Capability
-	Status                 string
-	RawMetadata            map[string]any
-	LastSyncedAt           time.Time
+	ID                     string         `json:"id"`
+	UpstreamAccountID      string         `json:"upstream_account_id"`
+	NormalizedModelName    string         `json:"normalized_model_name"`
+	UpstreamModelName      string         `json:"upstream_model_name"`
+	DisplayName            string         `json:"display_name"`
+	NativeWireProtocol     Protocol       `json:"native_wire_protocol"`
+	SupportedWireProtocols []Protocol     `json:"supported_wire_protocols"`
+	Capabilities           []Capability   `json:"capabilities"`
+	Status                 string         `json:"status"`
+	RawMetadata            map[string]any `json:"raw_metadata"`
+	LastSyncedAt           time.Time      `json:"last_synced_at"`
 }
 
 type UpstreamAccountEvent struct {
-	ID                string
-	UpstreamAccountID string
-	Operation         string
-	Status            string
-	ErrorClass        UpstreamErrorClass
-	Message           string
-	LatencyMS         int
-	Metadata          map[string]any
-	CreatedAt         time.Time
+	ID                string             `json:"id"`
+	UpstreamAccountID string             `json:"upstream_account_id"`
+	Operation         string             `json:"operation"`
+	Status            string             `json:"status"`
+	ErrorClass        UpstreamErrorClass `json:"error_class"`
+	Message           string             `json:"message"`
+	LatencyMS         int                `json:"latency_ms"`
+	Metadata          map[string]any     `json:"metadata"`
+	CreatedAt         time.Time          `json:"created_at"`
 }
 
 type ModelSyncResult struct {
