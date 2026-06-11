@@ -1,7 +1,10 @@
 package upstream
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -12,6 +15,8 @@ import (
 type NewAPIAccountAdapter struct {
 	accountHTTPAdapter
 }
+
+const defaultNewAPIQuotaPerUnit = 500000.0
 
 func NewNewAPIAccountAdapter(httpClient *http.Client, timeout time.Duration) *NewAPIAccountAdapter {
 	return &NewAPIAccountAdapter{accountHTTPAdapter: newAccountHTTPAdapter(httpClient, timeout)}
@@ -68,13 +73,13 @@ func (a *NewAPIAccountAdapter) RefreshQuota(ctx context.Context, account domain.
 			status := newAPIAccountStatusFromResponse(account.ID, resp, latencyMS(start))
 			return domain.QuotaRefreshResult{Status: status}, nil
 		}
-		amount := newAPISelfQuotaAmount(resp.body)
+		amount := newAPIQuotaUnitsToUSD(newAPISelfQuotaAmount(resp.body), a.quotaPerUnit(ctx, account))
 		status := healthyAPIStatus(account.ID, 0, latencyMS(start))
 		status.AccountStatus = domain.AccountCredentialStatusValid
 		status.BalanceAmount = amount
-		status.BalanceUnit = "quota"
+		status.BalanceUnit = "usd"
 		status.LastAccountCheckedAt = time.Now()
-		return domain.QuotaRefreshResult{Status: status, BalanceAmount: amount, BalanceUnit: "quota"}, nil
+		return domain.QuotaRefreshResult{Status: status, BalanceAmount: amount, BalanceUnit: "usd"}, nil
 	}
 
 	start := time.Now()
@@ -85,12 +90,12 @@ func (a *NewAPIAccountAdapter) RefreshQuota(ctx context.Context, account domain.
 	if resp.statusCode < 200 || resp.statusCode >= 300 {
 		return domain.QuotaRefreshResult{Status: failedAPIStatus(account.ID, resp.statusCode, resp.body)}, nil
 	}
-	amount := quotaAmount(resp.body)
+	amount := newAPIQuotaUnitsToUSD(quotaAmount(resp.body), a.quotaPerUnit(ctx, account))
 	status := healthyAPIStatus(account.ID, 0, latencyMS(start))
 	status.BalanceAmount = amount
-	status.BalanceUnit = "quota"
+	status.BalanceUnit = "usd"
 	status.LastAPICheckedAt = time.Now()
-	return domain.QuotaRefreshResult{Status: status, BalanceAmount: amount, BalanceUnit: "quota"}, nil
+	return domain.QuotaRefreshResult{Status: status, BalanceAmount: amount, BalanceUnit: "usd"}, nil
 }
 
 func (a *NewAPIAccountAdapter) Checkin(ctx context.Context, account domain.UpstreamAccount, credential string) (domain.CheckinResult, error) {
@@ -147,6 +152,24 @@ func (a *NewAPIAccountAdapter) doAccountCredential(ctx context.Context, method s
 		return a.doNewAPIUser(ctx, method, account, path, parsed, nil)
 	}
 	return a.doCookie(ctx, method, account, path, credential, nil)
+}
+
+func (a *NewAPIAccountAdapter) quotaPerUnit(ctx context.Context, account domain.UpstreamAccount) float64 {
+	resp, err := a.do(ctx, http.MethodGet, account, "/api/status", "", nil)
+	if err != nil || resp.statusCode < 200 || resp.statusCode >= 300 {
+		return defaultNewAPIQuotaPerUnit
+	}
+	if value, ok := numberFromAny(decodeJSONBody(resp.body)["quota_per_unit"]); ok && value > 0 {
+		return value
+	}
+	return defaultNewAPIQuotaPerUnit
+}
+
+func newAPIQuotaUnitsToUSD(quotaUnits float64, quotaPerUnit float64) float64 {
+	if quotaPerUnit <= 0 {
+		quotaPerUnit = defaultNewAPIQuotaPerUnit
+	}
+	return quotaUnits / quotaPerUnit
 }
 
 func newAPIAccountStatusFromResponse(accountID string, resp adapterResponse, latency int) domain.UpstreamAccountStatus {
@@ -211,4 +234,54 @@ func checkinResultForCredentialError(err error) domain.CheckinResult {
 		LastErrorClass:   domain.UpstreamErrorInvalidResponse,
 		LastErrorMessage: err.Error(),
 	}
+}
+
+func (a *NewAPIAccountAdapter) TestCall(ctx context.Context, account domain.UpstreamAccount, apiKey string, modelName string, protocol string, streaming bool, message string) (map[string]any, error) {
+	var path string
+	var reqBody map[string]any
+
+	switch protocol {
+	case "openai-chat":
+		path = "/v1/chat/completions"
+		reqBody = map[string]any{
+			"model":    modelName,
+			"messages": []map[string]string{{"role": "user", "content": message}},
+			"stream":   streaming,
+		}
+	case "claude-messages":
+		path = "/v1/messages"
+		reqBody = map[string]any{
+			"model":      modelName,
+			"messages":   []map[string]string{{"role": "user", "content": message}},
+			"max_tokens": 1024,
+			"stream":     streaming,
+		}
+	case "openai-responses":
+		path = "/v1/responses"
+		reqBody = map[string]any{
+			"model":  modelName,
+			"prompt": message,
+			"stream": streaming,
+		}
+	default:
+		return nil, fmt.Errorf("unsupported protocol: %s", protocol)
+	}
+
+	bodyBytes, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := a.do(ctx, http.MethodPost, account, path, authBearer(apiKey), bytes.NewReader(bodyBytes))
+	if err != nil {
+		return nil, err
+	}
+	if resp.statusCode < 200 || resp.statusCode >= 300 {
+		return map[string]any{"error": string(resp.body), "status_code": resp.statusCode}, nil
+	}
+
+	var result map[string]any
+	if err := json.Unmarshal(resp.body, &result); err != nil {
+		return map[string]any{"raw": string(resp.body)}, nil
+	}
+	return result, nil
 }

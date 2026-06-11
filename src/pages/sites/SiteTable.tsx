@@ -16,6 +16,7 @@ interface SiteTableProps {
   onDelete: (account: UpstreamAccount) => void;
   onAction: (account: UpstreamAccount, action: UpstreamActionName) => void;
   onInspect: (account: UpstreamAccount) => void;
+  onTestCall: (account: UpstreamAccount) => void;
 }
 
 export function SiteTable({
@@ -28,6 +29,7 @@ export function SiteTable({
   onDelete,
   onAction,
   onInspect,
+  onTestCall,
 }: SiteTableProps) {
   const allSelected = accounts.length > 0 && accounts.every((account) => selectedIds.includes(account.id));
 
@@ -45,7 +47,6 @@ export function SiteTable({
           <th className={tableCellClass}>模型</th>
           <th className={tableCellClass}>延迟</th>
           <th className={tableCellClass}>额度</th>
-          <th className={tableCellClass}>签到</th>
           <th className={tableCellClass}>操作</th>
         </tr>
       </thead>
@@ -83,22 +84,30 @@ export function SiteTable({
                 <StatusBadge status={account.status.accountStatus} />
               </td>
               <td className={tableCellClass}>{formatNumber(account.status.modelCount)}</td>
-              <td className={tableCellClass}>{formatLatency(account.status.latencyMs || undefined)}</td>
               <td className={tableCellClass}>
-                {account.status.balanceUnit ? `${formatNumber(account.status.balanceAmount)} ${account.status.balanceUnit}` : '-'}
+                <span
+                  className={
+                    account.status.latencyMs == null
+                      ? ''
+                      : account.status.latencyMs < 200
+                        ? 'text-green-500'
+                        : account.status.latencyMs < 500
+                          ? 'text-yellow-500'
+                          : 'text-red-500'
+                  }
+                >
+                  {formatLatency(account.status.latencyMs || undefined)}
+                </span>
               </td>
               <td className={tableCellClass}>
-                <StatusBadge status={account.status.checkinStatus} />
+                {account.status.balanceUnit ? `${formatNumber(account.status.balanceAmount)} ${account.status.balanceUnit}` : '-'}
               </td>
               <td className={tableCellClass}>
                 <div className="flex items-center gap-1.5">
                   <IconButton label="历史" onClick={() => onInspect(account)} icon={<BarChart3 className="h-4 w-4" />} />
                   <IconButton label="编辑" onClick={() => onEdit(account)} icon={<Edit className="h-4 w-4" />} />
-                  <IconButton label="测试 API" disabled={busy} onClick={() => onAction(account, 'test-api')} icon={<Activity className="h-4 w-4" />} />
-                  <IconButton label="测账号" disabled={busy} onClick={() => onAction(account, 'test-account')} icon={<KeyRound className="h-4 w-4" />} />
-                  <IconButton label="同步模型" disabled={busy} onClick={() => onAction(account, 'sync-models')} icon={<RefreshCw className="h-4 w-4" />} />
-                  <IconButton label="刷新额度" disabled={busy} onClick={() => onAction(account, 'refresh-quota')} icon={<RotateCcw className="h-4 w-4" />} />
-                  <IconButton label="签到" disabled={busy} onClick={() => onAction(account, 'checkin')} icon={<CheckCircle2 className="h-4 w-4" />} />
+                  <IconButton label="测试 API" disabled={busy} onClick={() => onTestCall(account)} icon={<Activity className="h-4 w-4" />} />
+                  <IconButton label="全量刷新" disabled={busy} onClick={() => onAction(account, 'refresh-all')} icon={<RefreshCw className="h-4 w-4" />} />
                   <IconButton label="删除" disabled={busy} onClick={() => onDelete(account)} icon={<Trash2 className="h-4 w-4" />} danger />
                 </div>
               </td>
@@ -124,8 +133,6 @@ function IconButton({
   danger?: boolean;
 }) {
   return (
-    <Button variant={danger ? 'danger' : 'icon'} className="h-8 w-8 p-0" onClick={onClick} disabled={disabled} title={label} aria-label={label}>
-      {icon}
-    </Button>
+    <Button variant={danger ? 'danger' : 'icon'} icon={icon} onClick={onClick} disabled={disabled} title={label} aria-label={label} />
   );
 }

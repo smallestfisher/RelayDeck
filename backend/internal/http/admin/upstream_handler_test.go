@@ -429,6 +429,10 @@ func (fakeAccountAdapter) Checkin(context.Context, domain.UpstreamAccount, strin
 	return domain.CheckinResult{Status: domain.CheckinStatusUnsupported}, nil
 }
 
+func (fakeAccountAdapter) TestCall(context.Context, domain.UpstreamAccount, string, string, string, bool, string) (map[string]any, error) {
+	return map[string]any{"ok": true}, nil
+}
+
 type rotatingAccountAdapter struct {
 	fakeAccountAdapter
 }

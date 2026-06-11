@@ -1,4 +1,4 @@
-import { Save, TestTube2 } from 'lucide-react';
+import { Save } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Button } from '../../components/ui/Button';
 import { SelectControl, ToggleSwitch } from '../../components/ui/Controls';
@@ -25,17 +25,15 @@ const emptyForm: UpstreamAccountInput = {
 
 interface SiteDrawerProps {
   open: boolean;
+  variant?: 'drawer' | 'modal';
   account?: UpstreamAccount | null;
   saving: boolean;
-  testing: boolean;
   error?: string;
-  notice?: string;
   onClose: () => void;
   onSave: (input: UpstreamAccountInput) => void;
-  onTestAPI: (input: UpstreamAccountInput) => void;
 }
 
-export function SiteDrawer({ open, account, saving, testing, error, notice, onClose, onSave, onTestAPI }: SiteDrawerProps) {
+export function SiteDrawer({ open, variant = 'drawer', account, saving, error, onClose, onSave }: SiteDrawerProps) {
   const [form, setForm] = useState<UpstreamAccountInput>(emptyForm);
   const [newAPIAccessToken, setNewAPIAccessToken] = useState('');
   const [newAPIUserID, setNewAPIUserID] = useState('');
@@ -107,15 +105,13 @@ export function SiteDrawer({ open, account, saving, testing, error, notice, onCl
   return (
     <Drawer
       open={open}
+      variant={variant}
       title={isEditing ? '编辑站点' : '添加站点'}
       subtitle={isEditing ? '更新上游普通用户账号配置' : '接入 New API 或 Sub2API 的普通用户账号'}
       onClose={onClose}
       footer={
         <div className="flex justify-end gap-3">
           <Button onClick={onClose}>取消</Button>
-          <Button variant="secondary" icon={<TestTube2 className="h-4 w-4" />} disabled={testing} onClick={() => onTestAPI(buildCredentialPayload(form))}>
-            {testing ? '测试中' : '测试 API'}
-          </Button>
           <Button variant="primary" icon={<Save className="h-4 w-4" />} disabled={saving} onClick={() => onSave(buildCredentialPayload(form))}>
             {saving ? '保存中' : '保存'}
           </Button>
@@ -124,7 +120,6 @@ export function SiteDrawer({ open, account, saving, testing, error, notice, onCl
     >
       <div className="space-y-5">
         {error && <div className="rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">{error}</div>}
-        {notice && <div className="rounded-lg border border-success/30 bg-success/10 px-3 py-2 text-sm text-success">{notice}</div>}
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Field label="站点名称 *">

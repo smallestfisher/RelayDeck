@@ -75,12 +75,14 @@ func (h *Handler) mountUpstreamRoutes(mux *http.ServeMux) {
 	mux.Handle("POST /api/admin/upstreams/accounts/{id}/sync-models", h.requireAdmin(http.HandlerFunc(h.handleUpstreamAction)))
 	mux.Handle("POST /api/admin/upstreams/accounts/{id}/refresh-quota", h.requireAdmin(http.HandlerFunc(h.handleUpstreamAction)))
 	mux.Handle("POST /api/admin/upstreams/accounts/{id}/checkin", h.requireAdmin(http.HandlerFunc(h.handleUpstreamAction)))
+	mux.Handle("POST /api/admin/upstreams/accounts/{id}/test-call", h.requireAdmin(http.HandlerFunc(h.handleTestCall)))
 	mux.Handle("GET /api/admin/upstreams/accounts/{id}/models", h.requireAdmin(http.HandlerFunc(h.handleUpstreamModels)))
 	mux.Handle("GET /api/admin/upstreams/accounts/{id}/events", h.requireAdmin(http.HandlerFunc(h.handleUpstreamEvents)))
 	mux.Handle("POST /api/admin/upstreams/accounts/batch/test-api", h.requireAdmin(http.HandlerFunc(h.handleBatchUpstreamAction)))
 	mux.Handle("POST /api/admin/upstreams/accounts/batch/sync-models", h.requireAdmin(http.HandlerFunc(h.handleBatchUpstreamAction)))
 	mux.Handle("POST /api/admin/upstreams/accounts/batch/refresh-quota", h.requireAdmin(http.HandlerFunc(h.handleBatchUpstreamAction)))
 	mux.Handle("POST /api/admin/upstreams/accounts/batch/checkin", h.requireAdmin(http.HandlerFunc(h.handleBatchUpstreamAction)))
+	mux.Handle("POST /api/admin/upstreams/accounts/batch/refresh-all", h.requireAdmin(http.HandlerFunc(h.handleBatchUpstreamAction)))
 }
 
 func (h *Handler) requireAdmin(next http.Handler) http.Handler {
@@ -346,6 +348,45 @@ func (h *Handler) runUpstreamAction(ctx context.Context, id string, action strin
 			actionResult.Message = result.Message
 		}
 		return actionResult
+	case "refresh-all":
+		// Test account credential + refresh quota
+		finalStatus := domain.UpstreamAccountStatus{UpstreamAccountID: account.ID, UpdatedAt: h.now()}
+		var models []domain.UpstreamSyncedModel
+
+		if accountCredential != "" {
+			testResult, err := adapter.TestAccountCredential(ctx, account, accountCredential)
+			if err == nil {
+				if updated, updateErr := h.applyCredentialUpdate(upstreams, account, testResult.CredentialUpdate); updateErr == nil {
+					account = updated
+				}
+				finalStatus.AccountStatus = testResult.Status.AccountStatus
+				finalStatus.CheckinStatus = testResult.Status.CheckinStatus
+				finalStatus.LastAccountCheckedAt = testResult.Status.LastAccountCheckedAt
+				finalStatus.BalanceAmount = testResult.Status.BalanceAmount
+				finalStatus.BalanceUnit = testResult.Status.BalanceUnit
+				if testResult.Status.LastErrorClass != "" {
+					finalStatus.LastErrorClass = testResult.Status.LastErrorClass
+					finalStatus.LastErrorMessage = testResult.Status.LastErrorMessage
+				}
+			}
+		}
+
+		// Sync models
+		syncResult, syncStatus, syncErr := adapter.SyncModels(ctx, account, apiKey)
+		if syncErr == nil {
+			models = syncResult.Models
+			finalStatus.APIStatus = syncStatus.APIStatus
+			finalStatus.ModelCount = syncStatus.ModelCount
+			finalStatus.LatencyMS = syncStatus.LatencyMS
+			finalStatus.LastAPICheckedAt = syncStatus.LastAPICheckedAt
+			finalStatus.LastModelSyncedAt = syncStatus.LastModelSyncedAt
+			if syncStatus.LastErrorClass != "" {
+				finalStatus.LastErrorClass = syncStatus.LastErrorClass
+				finalStatus.LastErrorMessage = syncStatus.LastErrorMessage
+			}
+		}
+
+		return h.storeActionStatus(upstreams, account, action, finalStatus, models, nil)
 	default:
 		return actionResult{ID: id, Status: "failed", Message: "unknown action"}
 	}
@@ -649,4 +690,50 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+type testCallRequest struct {
+	ModelName string `json:"model_name"`
+	Protocol  string `json:"protocol"`
+	Streaming bool   `json:"streaming"`
+	Message   string `json:"message"`
+}
+
+func (h *Handler) handleTestCall(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var req testCallRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+		return
+	}
+
+	upstreams := h.store.Upstreams()
+	if upstreams == nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "upstream store unavailable"})
+		return
+	}
+	account, ok := upstreams.UpstreamAccount(id)
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "account not found"})
+		return
+	}
+
+	adapter, ok := h.upstreams.For(account.PlatformKind)
+	if !ok {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "unsupported platform"})
+		return
+	}
+
+	apiKey, _, err := h.decryptAccountSecrets(account)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "decrypt secret failed"})
+		return
+	}
+
+	result, err := adapter.TestCall(r.Context(), account, apiKey, req.ModelName, req.Protocol, req.Streaming, req.Message)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
 }

@@ -6,6 +6,7 @@ import { LoginPage } from './pages/LoginPage';
 import { ModelsPage } from './pages/ModelsPage';
 import { OverviewPage } from './pages/OverviewPage';
 import { RoutingPage } from './pages/RoutingPage';
+import { SettingsPage } from './pages/SettingsPage';
 import { SitesPage } from './pages/SitesPage';
 import { TestPage } from './pages/TestPage';
 import { UsersPage } from './pages/UsersPage';
@@ -97,6 +98,7 @@ export default function App() {
     if (activePage === 'testing') return <TestPage />;
     if (activePage === 'users') return <UsersPage />;
     if (activePage === 'apiKeys') return <ApiKeysPage />;
+    if (activePage === 'settings') return <SettingsPage user={adminUser!} theme={theme} onThemeChange={setTheme} onLogout={handleLogout} />;
 
     return (
       <EmptyPage

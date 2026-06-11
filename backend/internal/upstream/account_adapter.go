@@ -19,6 +19,7 @@ type AccountAdapter interface {
 	SyncModels(ctx context.Context, account domain.UpstreamAccount, apiKey string) (domain.ModelSyncResult, domain.UpstreamAccountStatus, error)
 	RefreshQuota(ctx context.Context, account domain.UpstreamAccount, apiKey string, accountCredential string) (domain.QuotaRefreshResult, error)
 	Checkin(ctx context.Context, account domain.UpstreamAccount, accountCredential string) (domain.CheckinResult, error)
+	TestCall(ctx context.Context, account domain.UpstreamAccount, apiKey string, modelName string, protocol string, streaming bool, message string) (map[string]any, error)
 }
 
 type AccountAdapterRegistry struct {

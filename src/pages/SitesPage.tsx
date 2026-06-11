@@ -1,10 +1,11 @@
-import { Activity, AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight, Plus, RefreshCw, RotateCcw, ShieldCheck, Signal, XCircle } from 'lucide-react';
+import { Activity, AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight, Plus, RefreshCw, RotateCcw, ShieldCheck, Signal, Trash2, XCircle } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { SearchInput, SelectControl } from '../components/ui/Controls';
 import { Drawer } from '../components/ui/Drawer';
 import { MetricCard } from '../components/ui/MetricCard';
+import { TestCallModal } from '../components/modals/TestCallModal';
 import { adminApi } from '../lib/adminApi';
 import { formatLatency, formatNumber } from '../lib/format';
 import type {
@@ -21,7 +22,7 @@ import type {
 } from '../types';
 import { SiteDrawer } from './sites/SiteDrawer';
 import { SiteTable } from './sites/SiteTable';
-import { accountStatusOptions, apiStatusOptions, checkinStatusOptions, platformOptions } from './sites/siteOptions';
+import { accountStatusOptions, apiStatusOptions, platformOptions } from './sites/siteOptions';
 
 type LatencyBand = 'all' | 'low' | 'medium' | 'high' | 'unknown';
 
@@ -48,20 +49,19 @@ export function SitesPage() {
   const [platform, setPlatform] = useState<UpstreamPlatformKind | 'all'>('all');
   const [apiStatus, setApiStatus] = useState<UpstreamAPIStatus | 'all'>('all');
   const [accountStatus, setAccountStatus] = useState<AccountCredentialStatus | 'all'>('all');
-  const [checkinStatus, setCheckinStatus] = useState<UpstreamCheckinStatus | 'all'>('all');
   const [latencyBand, setLatencyBand] = useState<LatencyBand>('all');
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editingAccount, setEditingAccount] = useState<UpstreamAccount | null>(null);
   const [inspectAccount, setInspectAccount] = useState<UpstreamAccount | null>(null);
+  const [testCallAccount, setTestCallAccount] = useState<UpstreamAccount | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<UpstreamAccount | null>(null);
+  const [batchDeleteConfirm, setBatchDeleteConfirm] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [testingDraft, setTestingDraft] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState('');
   const [batchNotice, setBatchNotice] = useState('');
   const [drawerError, setDrawerError] = useState('');
-  const [drawerNotice, setDrawerNotice] = useState('');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
   const [total, setTotal] = useState(0);
@@ -72,7 +72,7 @@ export function SitesPage() {
 
   useEffect(() => {
     setPage(1);
-  }, [accountStatus, apiStatus, checkinStatus, latencyBand, platform, query]);
+  }, [accountStatus, apiStatus, latencyBand, platform, query]);
 
   const filteredAccounts = useMemo(() => {
     const keyword = query.trim().toLowerCase();
@@ -86,11 +86,10 @@ export function SitesPage() {
       const matchesPlatform = platform === 'all' || account.platformKind === platform;
       const matchesAPIStatus = apiStatus === 'all' || account.status.apiStatus === apiStatus;
       const matchesAccountStatus = accountStatus === 'all' || account.status.accountStatus === accountStatus;
-      const matchesCheckinStatus = checkinStatus === 'all' || account.status.checkinStatus === checkinStatus;
       const matchesLatency = latencyBand === 'all' || latencyMatches(account.status.latencyMs, latencyBand);
-      return matchesQuery && matchesPlatform && matchesAPIStatus && matchesAccountStatus && matchesCheckinStatus && matchesLatency;
+      return matchesQuery && matchesPlatform && matchesAPIStatus && matchesAccountStatus && matchesLatency;
     });
-  }, [accounts, accountStatus, apiStatus, checkinStatus, latencyBand, platform, query]);
+  }, [accounts, accountStatus, apiStatus, latencyBand, platform, query]);
 
   const metrics = useMemo(() => {
     const healthy = accounts.filter((account) => account.enabled && account.status.apiStatus === 'healthy').length;
@@ -98,7 +97,6 @@ export function SitesPage() {
     const manual = accounts.filter(
       (account) =>
         account.status.accountStatus === 'action_required' ||
-        account.status.checkinStatus === 'action_required' ||
         account.status.accountStatus === 'not_configured'
     ).length;
     return { total, healthy, warning, manual };
@@ -133,7 +131,6 @@ export function SitesPage() {
     }
     setSaving(true);
     setDrawerError('');
-    setDrawerNotice('');
     try {
       if (editingAccount) {
         await adminApi.updateUpstreamAccount(editingAccount.id, input);
@@ -147,40 +144,6 @@ export function SitesPage() {
       setDrawerError(err instanceof Error ? err.message : '保存失败');
     } finally {
       setSaving(false);
-    }
-  }
-
-  async function runDraftTest(input: UpstreamAccountInput) {
-    setDrawerError('');
-    setDrawerNotice('');
-    if (editingAccount) {
-      const target = editingAccount;
-      setBusyIds((current) => [...new Set([...current, target.id])]);
-      try {
-        const result = await adminApi.runUpstreamAction(target.id, 'test-api');
-        applyActionResults([result]);
-        setDrawerNotice('API 测试完成');
-      } catch (err) {
-        setDrawerError(err instanceof Error ? err.message : 'API 测试失败');
-      } finally {
-        setBusyIds((current) => current.filter((id) => id !== target.id));
-      }
-      return;
-    }
-    const validation = validateDraftTestInput(input);
-    if (validation) {
-      setDrawerError(validation);
-      return;
-    }
-    try {
-      const result = await adminApi.testUpstreamDraft(input);
-      if (result.status === 'success') {
-        setDrawerNotice('API 测试通过');
-      } else {
-        setDrawerError(result.message || 'API 测试失败');
-      }
-    } catch (err) {
-      setDrawerError(err instanceof Error ? err.message : 'API 测试失败');
     }
   }
 
@@ -239,6 +202,24 @@ export function SitesPage() {
     }
   }
 
+  async function confirmBatchDelete() {
+    if (selectedIds.length === 0) return;
+    setDeleting(true);
+    setBusyIds((current) => [...new Set([...current, ...selectedIds])]);
+    setError('');
+    try {
+      await Promise.all(selectedIds.map((id) => adminApi.deleteUpstreamAccount(id)));
+      setSelectedIds([]);
+      setBatchDeleteConfirm(false);
+      await loadAccounts(page, pageSize);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '批量删除失败');
+    } finally {
+      setBusyIds((current) => current.filter((id) => !selectedIds.includes(id)));
+      setDeleting(false);
+    }
+  }
+
   async function inspect(account: UpstreamAccount) {
     setInspectAccount(account);
     try {
@@ -270,14 +251,12 @@ export function SitesPage() {
   function openCreateDrawer() {
     setEditingAccount(null);
     setDrawerError('');
-    setDrawerNotice('');
     setDrawerOpen(true);
   }
 
   function openEditDrawer(account: UpstreamAccount) {
     setEditingAccount(account);
     setDrawerError('');
-    setDrawerNotice('');
     setDrawerOpen(true);
   }
 
@@ -321,28 +300,19 @@ export function SitesPage() {
             value={accountStatus}
             onChange={(event) => setAccountStatus(event.target.value as AccountCredentialStatus | 'all')}
           />
-          <SelectControl
-            className="w-40"
-            options={checkinStatusOptions}
-            value={checkinStatus}
-            onChange={(event) => setCheckinStatus(event.target.value as UpstreamCheckinStatus | 'all')}
-          />
           <SelectControl className="w-36" options={latencyOptions} value={latencyBand} onChange={(event) => setLatencyBand(event.target.value as LatencyBand)} />
           <div className="ml-auto flex flex-wrap justify-end gap-2">
             <Button variant="secondary" icon={<RefreshCw className="h-4 w-4" />} onClick={() => void loadAccounts(page, pageSize)} disabled={loading}>
               刷新
             </Button>
             <Button variant="secondary" icon={<Activity className="h-4 w-4" />} onClick={() => runBatch('test-api')} disabled={selectedActionDisabled}>
-              批量检测
+              批量检测 API
             </Button>
-            <Button variant="secondary" icon={<RefreshCw className="h-4 w-4" />} onClick={() => runBatch('sync-models')} disabled={selectedActionDisabled}>
-              批量同步
+            <Button variant="secondary" icon={<RefreshCw className="h-4 w-4" />} onClick={() => runBatch('refresh-all')} disabled={selectedActionDisabled}>
+              批量全量刷新
             </Button>
-            <Button variant="secondary" icon={<RotateCcw className="h-4 w-4" />} onClick={() => runBatch('refresh-quota')} disabled={selectedActionDisabled}>
-              批量额度
-            </Button>
-            <Button variant="secondary" icon={<CheckCircle2 className="h-4 w-4" />} onClick={() => runBatch('checkin')} disabled={selectedActionDisabled}>
-              批量签到
+            <Button variant="danger" icon={<Trash2 className="h-4 w-4" />} onClick={() => setBatchDeleteConfirm(true)} disabled={selectedActionDisabled}>
+              批量删除
             </Button>
           </div>
         </div>
@@ -365,6 +335,7 @@ export function SitesPage() {
             onDelete={deleteAccount}
             onAction={runAction}
             onInspect={inspect}
+            onTestCall={setTestCallAccount}
           />
         )}
 
@@ -382,36 +353,28 @@ export function SitesPage() {
                 setPage(1);
               }}
             />
-            <Button variant="icon" className="h-9 w-9 p-0" disabled={page <= 1 || loading} onClick={() => setPage((current) => Math.max(1, current - 1))} aria-label="上一页">
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
+            <Button variant="icon" icon={<ChevronLeft className="h-4 w-4" />} disabled={page <= 1 || loading} onClick={() => setPage((current) => Math.max(1, current - 1))} aria-label="上一页" />
             <span className="min-w-20 text-center text-sm text-muted">
               {page} / {totalPages}
             </span>
-            <Button variant="icon" className="h-9 w-9 p-0" disabled={page >= totalPages || loading} onClick={() => setPage((current) => Math.min(totalPages, current + 1))} aria-label="下一页">
-              <ChevronRight className="h-4 w-4" />
-            </Button>
+            <Button variant="icon" icon={<ChevronRight className="h-4 w-4" />} disabled={page >= totalPages || loading} onClick={() => setPage((current) => Math.min(totalPages, current + 1))} aria-label="下一页" />
           </div>
         </div>
       </Card>
 
       <SiteDrawer
         open={drawerOpen}
+        variant="modal"
         account={editingAccount}
         saving={saving}
-        testing={testingDraft}
         error={drawerError}
-        notice={drawerNotice}
         onClose={() => setDrawerOpen(false)}
         onSave={saveAccount}
-        onTestAPI={(input) => {
-          setTestingDraft(true);
-          void runDraftTest(input).finally(() => setTestingDraft(false));
-        }}
       />
 
       <Drawer
         open={Boolean(deleteTarget)}
+        variant="modal"
         title="删除站点"
         subtitle={deleteTarget?.name}
         onClose={() => {
@@ -439,7 +402,34 @@ export function SitesPage() {
         )}
       </Drawer>
 
-      <Drawer open={Boolean(inspectAccount)} title="站点历史" subtitle={inspectAccount?.name} onClose={() => setInspectAccount(null)}>
+      <Drawer
+        open={batchDeleteConfirm}
+        variant="modal"
+        title="批量删除站点"
+        subtitle={`已选择 ${selectedIds.length} 个站点`}
+        onClose={() => {
+          if (!deleting) setBatchDeleteConfirm(false);
+        }}
+        footer={
+          <div className="flex justify-end gap-3">
+            <Button onClick={() => setBatchDeleteConfirm(false)} disabled={deleting}>
+              取消
+            </Button>
+            <Button variant="danger" onClick={() => void confirmBatchDelete()} disabled={deleting}>
+              {deleting ? '删除中' : '确认删除'}
+            </Button>
+          </div>
+        }
+      >
+        <div className="rounded-lg border border-danger/25 bg-danger/10 p-4 text-sm leading-6 text-danger">
+          删除后会移除这些站点的状态、模型与操作历史。此操作不可撤销。
+        </div>
+        <div className="mt-4 rounded-lg border border-line bg-elevated/45 p-4 text-sm text-muted">
+          将删除 <span className="font-medium text-text">{selectedIds.length}</span> 个站点
+        </div>
+      </Drawer>
+
+      <Drawer open={Boolean(inspectAccount)} variant="modal" title="站点历史" subtitle={inspectAccount?.name} onClose={() => setInspectAccount(null)}>
         <div className="space-y-3">
           {inspectAccount && (
             <div className="rounded-lg border border-line bg-elevated/45 p-4 text-sm text-muted">
@@ -467,6 +457,8 @@ export function SitesPage() {
           )}
         </div>
       </Drawer>
+
+      {testCallAccount && <TestCallModal account={testCallAccount} onClose={() => setTestCallAccount(null)} />}
     </div>
   );
 }
@@ -484,7 +476,7 @@ function batchSummary(results: UpstreamActionResult[]): string {
   const success = results.filter((item) => item.status === 'success').length;
   const failed = results.length - success;
   const actionRequired = results.filter(
-    (item) => item.accountStatus?.accountStatus === 'action_required' || item.accountStatus?.checkinStatus === 'action_required'
+    (item) => item.accountStatus?.accountStatus === 'action_required'
   ).length;
   const expired = results.filter((item) => item.accountStatus?.accountStatus === 'expired').length;
   const details = [`成功 ${success}`, `失败 ${failed}`];
@@ -515,12 +507,6 @@ function validateAccountInput(input: UpstreamAccountInput, editingAccount: Upstr
       return '请填写 Sub2API Refresh Token';
     }
   }
-  return '';
-}
-
-function validateDraftTestInput(input: UpstreamAccountInput): string {
-  if (!input.baseUrl.trim()) return '请填写 Base URL';
-  if (!input.apiKey?.trim()) return '请填写 API Key';
   return '';
 }
 

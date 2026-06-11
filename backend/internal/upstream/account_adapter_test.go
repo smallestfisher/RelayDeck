@@ -44,13 +44,17 @@ func TestNewAPIAdapterSyncModelsUsesAPIKeyModelList(t *testing.T) {
 
 func TestNewAPIAdapterRefreshQuotaUsesTokenUsage(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/usage/token" {
+		switch r.URL.Path {
+		case "/api/usage/token":
+			if r.Header.Get("Authorization") != "Bearer sk-test" {
+				t.Fatalf("unexpected authorization: %q", r.Header.Get("Authorization"))
+			}
+			writeTestJSON(t, w, map[string]any{"data": map[string]any{"remain_quota": 500000}})
+		case "/api/status":
+			writeTestJSON(t, w, map[string]any{"quota_per_unit": 500000})
+		default:
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
-		if r.Header.Get("Authorization") != "Bearer sk-test" {
-			t.Fatalf("unexpected authorization: %q", r.Header.Get("Authorization"))
-		}
-		writeTestJSON(t, w, map[string]any{"data": map[string]any{"remain_quota": 42.5}})
 	}))
 	defer server.Close()
 
@@ -59,7 +63,7 @@ func TestNewAPIAdapterRefreshQuotaUsesTokenUsage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("refresh quota: %v", err)
 	}
-	if result.Status.APIStatus != domain.UpstreamAPIStatusHealthy || result.BalanceAmount != 42.5 {
+	if result.Status.APIStatus != domain.UpstreamAPIStatusHealthy || result.BalanceAmount != 1 || result.BalanceUnit != "usd" {
 		t.Fatalf("unexpected quota result: %+v", result)
 	}
 }
@@ -114,13 +118,17 @@ func TestNewAPIAdapterAccountCredentialSuccessFalseExpiresCredential(t *testing.
 
 func TestNewAPIAdapterRefreshQuotaUsesUserSelfQuotaMinusUsedQuota(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/user/self" {
+		switch r.URL.Path {
+		case "/api/user/self":
+			if r.Header.Get("Authorization") != "token-123" || r.Header.Get("New-Api-User") != "42" {
+				t.Fatalf("unexpected headers: authorization=%q user=%q", r.Header.Get("Authorization"), r.Header.Get("New-Api-User"))
+			}
+			writeTestJSON(t, w, map[string]any{"success": true, "data": map[string]any{"quota": 600000, "used_quota": 100000}})
+		case "/api/status":
+			writeTestJSON(t, w, map[string]any{"quota_per_unit": 500000})
+		default:
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
-		if r.Header.Get("Authorization") != "token-123" || r.Header.Get("New-Api-User") != "42" {
-			t.Fatalf("unexpected headers: authorization=%q user=%q", r.Header.Get("Authorization"), r.Header.Get("New-Api-User"))
-		}
-		writeTestJSON(t, w, map[string]any{"success": true, "data": map[string]any{"quota": 100, "used_quota": 25}})
 	}))
 	defer server.Close()
 
@@ -131,7 +139,7 @@ func TestNewAPIAdapterRefreshQuotaUsesUserSelfQuotaMinusUsedQuota(t *testing.T) 
 	if err != nil {
 		t.Fatalf("refresh quota: %v", err)
 	}
-	if result.BalanceAmount != 75 || result.BalanceUnit != "quota" {
+	if result.BalanceAmount != 1 || result.BalanceUnit != "usd" {
 		t.Fatalf("unexpected quota result: %+v", result)
 	}
 }

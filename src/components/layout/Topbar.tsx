@@ -1,5 +1,7 @@
-import { Bell, ChevronDown, LogOut, Moon, RefreshCw, Search, Sun } from 'lucide-react';
-import type { AdminUser, ThemeMode } from '../../types';
+import { Bell, ChevronDown, LogOut, Moon, RefreshCw, Search, Settings, Sun } from 'lucide-react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import type { AdminUser, PageId, ThemeMode } from '../../types';
 import { Button } from '../ui/Button';
 
 interface TopbarProps {
@@ -7,10 +9,54 @@ interface TopbarProps {
   user: AdminUser;
   onThemeToggle: () => void;
   onLogout: () => void;
+  onNavigate: (page: PageId) => void;
 }
 
-export function Topbar({ theme, user, onThemeToggle, onLogout }: TopbarProps) {
+export function Topbar({ theme, user, onThemeToggle, onLogout, onNavigate }: TopbarProps) {
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [menuPosition, setMenuPosition] = useState({ top: 68, right: 32 });
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const avatarText = user.email.slice(0, 1).toUpperCase();
+  const userName = user.email.split('@')[0];
+
+  function updateMenuPosition() {
+    const rect = triggerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+
+    setMenuPosition({
+      top: rect.bottom + 8,
+      right: Math.max(16, window.innerWidth - rect.right),
+    });
+  }
+
+  useEffect(() => {
+    if (!dropdownOpen) return;
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        setDropdownOpen(false);
+      }
+    }
+
+    document.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [dropdownOpen]);
+
+  useLayoutEffect(() => {
+    if (!dropdownOpen) return;
+
+    updateMenuPosition();
+    window.addEventListener('resize', updateMenuPosition);
+    window.addEventListener('scroll', updateMenuPosition, true);
+
+    return () => {
+      window.removeEventListener('resize', updateMenuPosition);
+      window.removeEventListener('scroll', updateMenuPosition, true);
+    };
+  }, [dropdownOpen]);
 
   return (
     <header className="sticky top-0 z-20 flex h-[68px] items-center justify-between border-b border-line bg-app/82 px-8 backdrop-blur-xl">
@@ -25,15 +71,6 @@ export function Topbar({ theme, user, onThemeToggle, onLogout }: TopbarProps) {
         </span>
       </div>
       <div className="ml-8 flex shrink-0 items-center gap-5">
-        <button type="button" className="flex items-center gap-2 text-sm text-muted hover:text-text">
-          系统检测频率：
-          <span className="font-semibold text-text">5 分钟</span>
-          <ChevronDown className="h-4 w-4" />
-        </button>
-        <div className="flex h-9 items-center gap-2 rounded-full border border-success/25 bg-success/10 px-4 text-sm font-medium text-success">
-          <span className="h-2.5 w-2.5 rounded-full bg-success" />
-          系统运行中
-        </div>
         <Button variant="icon" aria-label="通知">
           <span className="relative">
             <Bell className="h-5 w-5" />
@@ -63,16 +100,67 @@ export function Topbar({ theme, user, onThemeToggle, onLogout }: TopbarProps) {
         <Button variant="icon" aria-label="刷新">
           <RefreshCw className="h-5 w-5" />
         </Button>
-        <button type="button" className="flex items-center gap-3 text-sm font-medium text-text" title={user.email}>
-          <span className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-slate-300 to-slate-600 text-sm text-white">
-            {avatarText}
-          </span>
-          <span className="max-w-[150px] truncate">{user.email}</span>
-          <ChevronDown className="h-4 w-4 text-muted" />
-        </button>
-        <Button variant="icon" aria-label="退出登录" title="退出登录" onClick={onLogout}>
-          <LogOut className="h-5 w-5" />
-        </Button>
+        <div className="relative">
+          <button
+            ref={triggerRef}
+            type="button"
+            className="flex items-center gap-3 text-sm font-medium text-text hover:opacity-80"
+            onClick={() => {
+              updateMenuPosition();
+              setDropdownOpen((open) => !open);
+            }}
+            aria-expanded={dropdownOpen}
+            aria-haspopup="menu"
+          >
+            <span className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-slate-300 to-slate-600 text-sm text-white">
+              {avatarText}
+            </span>
+            <span>{userName}</span>
+            <ChevronDown className="h-4 w-4 text-muted" />
+          </button>
+          {dropdownOpen &&
+            createPortal(
+              <>
+                <button
+                  type="button"
+                  className="fixed inset-0 z-40 cursor-default"
+                  onClick={() => setDropdownOpen(false)}
+                  aria-label="关闭菜单"
+                />
+                <div
+                  className="fixed z-50 w-48 rounded-lg border border-line bg-panel shadow-xl"
+                  style={{ top: menuPosition.top, right: menuPosition.right }}
+                  role="menu"
+                >
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-3 px-4 py-3 text-sm text-text hover:bg-elevated"
+                    onClick={() => {
+                      setDropdownOpen(false);
+                      onNavigate('settings');
+                    }}
+                    role="menuitem"
+                  >
+                    <Settings className="h-4 w-4" />
+                    系统设置
+                  </button>
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-3 border-t border-line px-4 py-3 text-sm text-danger hover:bg-elevated"
+                    onClick={() => {
+                      setDropdownOpen(false);
+                      onLogout();
+                    }}
+                    role="menuitem"
+                  >
+                    <LogOut className="h-4 w-4" />
+                    退出登录
+                  </button>
+                </div>
+              </>,
+              document.body
+            )}
+        </div>
       </div>
     </header>
   );

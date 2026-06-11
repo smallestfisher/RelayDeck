@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -292,4 +293,8 @@ func sub2APIPlatformQuotaAmount(body []byte) float64 {
 		return amount
 	}
 	return 0
+}
+
+func (a *Sub2APIAccountAdapter) TestCall(ctx context.Context, account domain.UpstreamAccount, apiKey string, modelName string, protocol string, streaming bool, message string) (map[string]any, error) {
+	return nil, errors.New("test call not supported for sub2api")
 }
