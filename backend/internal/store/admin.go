@@ -8,25 +8,41 @@ type UserReader interface {
 	UserByID(id string) (domain.User, bool)
 }
 
-type AdminStore struct {
-	config *MemoryStore
-	users  UserReader
+type GatewayConfigReader interface {
+	APIKeys() []domain.APIKey
+	Models() []domain.Model
+	Sites() []domain.UpstreamSite
 }
 
-func NewAdminStore(config *MemoryStore, users UserReader) *AdminStore {
-	return &AdminStore{config: config, users: users}
+type AdminStore struct {
+	users     UserReader
+	gateway   GatewayConfigReader
+	upstreams UpstreamAccountStore
+}
+
+func NewAdminStore(users UserReader, gateway GatewayConfigReader, upstreams UpstreamAccountStore) *AdminStore {
+	return &AdminStore{users: users, gateway: gateway, upstreams: upstreams}
 }
 
 func (s *AdminStore) APIKeys() []domain.APIKey {
-	return s.config.APIKeys()
+	if s.gateway == nil {
+		return nil
+	}
+	return s.gateway.APIKeys()
 }
 
 func (s *AdminStore) Models() []domain.Model {
-	return s.config.Models()
+	if s.gateway == nil {
+		return nil
+	}
+	return s.gateway.Models()
 }
 
 func (s *AdminStore) Sites() []domain.UpstreamSite {
-	return s.config.Sites()
+	if s.gateway == nil {
+		return nil
+	}
+	return s.gateway.Sites()
 }
 
 func (s *AdminStore) Users() []domain.User {
@@ -39,4 +55,8 @@ func (s *AdminStore) UserByEmail(email string) (domain.User, bool) {
 
 func (s *AdminStore) UserByID(id string) (domain.User, bool) {
 	return s.users.UserByID(id)
+}
+
+func (s *AdminStore) Upstreams() UpstreamAccountStore {
+	return s.upstreams
 }

@@ -137,12 +137,21 @@ func fixedAdminNow() time.Time {
 }
 
 type testAdminStore struct {
-	users []domain.User
+	users   []domain.User
+	apiKeys []domain.APIKey
+	models  []domain.Model
+	sites   []domain.UpstreamSite
 }
 
-func (s *testAdminStore) APIKeys() []domain.APIKey     { return nil }
-func (s *testAdminStore) Models() []domain.Model       { return nil }
-func (s *testAdminStore) Sites() []domain.UpstreamSite { return nil }
+func (s *testAdminStore) APIKeys() []domain.APIKey {
+	return append([]domain.APIKey(nil), s.apiKeys...)
+}
+func (s *testAdminStore) Models() []domain.Model {
+	return append([]domain.Model(nil), s.models...)
+}
+func (s *testAdminStore) Sites() []domain.UpstreamSite {
+	return append([]domain.UpstreamSite(nil), s.sites...)
+}
 func (s *testAdminStore) Mappings() []domain.SiteModel { return nil }
 func (s *testAdminStore) Users() []domain.User         { return append([]domain.User(nil), s.users...) }
 func (s *testAdminStore) UserByEmail(email string) (domain.User, bool) {

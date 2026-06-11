@@ -8,12 +8,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/smallestfisher/relaydeck/backend/internal/store"
+	"github.com/smallestfisher/relaydeck/backend/internal/auth"
+	"github.com/smallestfisher/relaydeck/backend/internal/domain"
 	"github.com/smallestfisher/relaydeck/backend/internal/upstream"
 )
 
 func TestModelsRequiresAuthAndReturnsCanonicalModels(t *testing.T) {
-	handler := New(store.NewMemoryStore(), upstream.NewClientWithHTTPClient(successHTTPClient(t)), fixedNow)
+	handler := New(newTestGatewayStore(), upstream.NewClientWithHTTPClient(successHTTPClient(t)), fixedNow)
 
 	unauthorized := httptest.NewRecorder()
 	handler.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodGet, "/v1/models", nil))
@@ -52,7 +53,7 @@ func TestChatCompletionsProxiesToMappedUpstream(t *testing.T) {
 			Body:       io.NopCloser(strings.NewReader(`{"id":"chatcmpl_test","object":"chat.completion"}`)),
 		}, nil
 	}))
-	handler := New(store.NewMemoryStore(), client, fixedNow)
+	handler := New(newTestGatewayStore(), client, fixedNow)
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}]}`))
 	req.Header.Set("Authorization", "Bearer rd_live_dev_test_secret")
@@ -69,7 +70,7 @@ func TestChatCompletionsProxiesToMappedUpstream(t *testing.T) {
 }
 
 func TestResponsesReturnsCompatibilityErrorWhenUnsupported(t *testing.T) {
-	handler := New(store.NewMemoryStore(), upstream.NewClientWithHTTPClient(successHTTPClient(t)), fixedNow)
+	handler := New(newTestGatewayStore(), upstream.NewClientWithHTTPClient(successHTTPClient(t)), fixedNow)
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-4o-mini","input":"hi"}`))
 	req.Header.Set("Authorization", "Bearer rd_live_dev_test_secret")
 	rec := httptest.NewRecorder()
@@ -86,6 +87,80 @@ func TestResponsesReturnsCompatibilityErrorWhenUnsupported(t *testing.T) {
 
 func fixedNow() time.Time {
 	return time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+}
+
+type testGatewayStore struct {
+	apiKeys  []domain.APIKey
+	models   []domain.Model
+	sites    []domain.UpstreamSite
+	mappings []domain.SiteModel
+}
+
+func newTestGatewayStore() *testGatewayStore {
+	now := fixedNow()
+	return &testGatewayStore{
+		apiKeys: []domain.APIKey{
+			{
+				ID:              "key_dev",
+				UserID:          "user_admin",
+				Prefix:          "rd_live_dev",
+				Hash:            auth.HashSecret("rd_live_dev_test_secret"),
+				Status:          domain.APIKeyStatusActive,
+				Scopes:          []domain.Scope{domain.ScopeChatCompletions, domain.ScopeResponses},
+				AllowedModels:   []string{"gpt-4o-mini", "gpt-4o"},
+				ExpiresAt:       now.AddDate(10, 0, 0),
+				OwnerIsActive:   true,
+				RPM:             120,
+				TPM:             60000,
+				AllowedCIDRs:    []string{"0.0.0.0/0"},
+				MonthlyQuotaTPM: 1000000,
+			},
+		},
+		models: []domain.Model{
+			{ID: "gpt-4o-mini", Name: "GPT-4o Mini", Capabilities: []domain.Capability{domain.CapabilityChat, domain.CapabilityStreaming}},
+			{ID: "gpt-4o", Name: "GPT-4o", Capabilities: []domain.Capability{domain.CapabilityChat, domain.CapabilityStreaming, domain.CapabilityVision}},
+		},
+		sites: []domain.UpstreamSite{
+			{
+				ID:           "upstream_dev",
+				Name:         "Dev Upstream",
+				BaseURL:      "https://upstream.example",
+				Credential:   "upstream-dev-secret",
+				Enabled:      true,
+				Weight:       80,
+				HealthScore:  95,
+				SuccessRate:  99,
+				LatencyMS:    120,
+				Circuit:      domain.CircuitClosed,
+				Capabilities: []domain.Capability{domain.CapabilityChat, domain.CapabilityStreaming},
+			},
+		},
+		mappings: []domain.SiteModel{
+			{
+				SiteID:        "upstream_dev",
+				Model:         "gpt-4o-mini",
+				UpstreamModel: "upstream-gpt-4o-mini",
+				EndpointTypes: []domain.EndpointType{domain.EndpointChatCompletions},
+				Capabilities:  []domain.Capability{domain.CapabilityChat, domain.CapabilityStreaming},
+			},
+		},
+	}
+}
+
+func (s *testGatewayStore) APIKeys() []domain.APIKey {
+	return append([]domain.APIKey(nil), s.apiKeys...)
+}
+
+func (s *testGatewayStore) Models() []domain.Model {
+	return append([]domain.Model(nil), s.models...)
+}
+
+func (s *testGatewayStore) Sites() []domain.UpstreamSite {
+	return append([]domain.UpstreamSite(nil), s.sites...)
+}
+
+func (s *testGatewayStore) Mappings() []domain.SiteModel {
+	return append([]domain.SiteModel(nil), s.mappings...)
 }
 
 func successHTTPClient(t *testing.T) *http.Client {

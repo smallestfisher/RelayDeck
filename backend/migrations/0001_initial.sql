@@ -135,3 +135,73 @@ CREATE TABLE usage_daily (
   total_tokens BIGINT NOT NULL DEFAULT 0,
   PRIMARY KEY(day, user_id, api_key_id, model_id, site_id)
 );
+
+CREATE TABLE upstream_accounts (
+  id UUID PRIMARY KEY,
+  name TEXT NOT NULL,
+  code TEXT NOT NULL UNIQUE,
+  platform_kind TEXT NOT NULL,
+  base_url TEXT NOT NULL,
+  enabled BOOLEAN NOT NULL DEFAULT true,
+  include_in_routing BOOLEAN NOT NULL DEFAULT true,
+  priority INTEGER NOT NULL DEFAULT 0,
+  api_key_enc TEXT NOT NULL,
+  api_key_prefix TEXT NOT NULL DEFAULT '',
+  account_credential_kind TEXT NOT NULL DEFAULT 'none',
+  account_credential_enc TEXT NOT NULL DEFAULT '',
+  auto_sync_models BOOLEAN NOT NULL DEFAULT true,
+  auto_refresh_quota BOOLEAN NOT NULL DEFAULT false,
+  auto_checkin BOOLEAN NOT NULL DEFAULT false,
+  note TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE upstream_account_status (
+  upstream_account_id UUID PRIMARY KEY REFERENCES upstream_accounts(id) ON DELETE CASCADE,
+  api_status TEXT NOT NULL DEFAULT 'unknown',
+  account_status TEXT NOT NULL DEFAULT 'not_configured',
+  checkin_status TEXT NOT NULL DEFAULT 'unsupported',
+  model_count INTEGER NOT NULL DEFAULT 0,
+  latency_ms INTEGER NOT NULL DEFAULT 0,
+  balance_amount DOUBLE PRECISION NOT NULL DEFAULT 0,
+  balance_unit TEXT NOT NULL DEFAULT '',
+  last_api_checked_at TIMESTAMPTZ,
+  last_account_checked_at TIMESTAMPTZ,
+  last_model_synced_at TIMESTAMPTZ,
+  last_checkin_at TIMESTAMPTZ,
+  last_error_class TEXT NOT NULL DEFAULT '',
+  last_error_message TEXT NOT NULL DEFAULT '',
+  action_required_reason TEXT NOT NULL DEFAULT '',
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE upstream_synced_models (
+  id UUID PRIMARY KEY,
+  upstream_account_id UUID NOT NULL REFERENCES upstream_accounts(id) ON DELETE CASCADE,
+  normalized_model_name TEXT NOT NULL,
+  upstream_model_name TEXT NOT NULL,
+  display_name TEXT NOT NULL DEFAULT '',
+  native_wire_protocol TEXT NOT NULL DEFAULT '',
+  supported_wire_protocols TEXT[] NOT NULL DEFAULT '{}',
+  capabilities TEXT[] NOT NULL DEFAULT '{}',
+  status TEXT NOT NULL DEFAULT 'active',
+  raw_metadata JSONB NOT NULL DEFAULT '{}',
+  last_synced_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE(upstream_account_id, normalized_model_name, upstream_model_name)
+);
+
+CREATE TABLE upstream_account_events (
+  id UUID PRIMARY KEY,
+  upstream_account_id UUID NOT NULL REFERENCES upstream_accounts(id) ON DELETE CASCADE,
+  operation TEXT NOT NULL,
+  status TEXT NOT NULL,
+  error_class TEXT NOT NULL DEFAULT '',
+  message TEXT NOT NULL DEFAULT '',
+  latency_ms INTEGER NOT NULL DEFAULT 0,
+  metadata JSONB NOT NULL DEFAULT '{}',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX upstream_account_events_account_created_idx
+  ON upstream_account_events(upstream_account_id, created_at DESC);

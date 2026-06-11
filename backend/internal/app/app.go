@@ -8,6 +8,7 @@ import (
 
 	"github.com/smallestfisher/relaydeck/backend/internal/auth"
 	"github.com/smallestfisher/relaydeck/backend/internal/config"
+	"github.com/smallestfisher/relaydeck/backend/internal/domain"
 	"github.com/smallestfisher/relaydeck/backend/internal/http/admin"
 	"github.com/smallestfisher/relaydeck/backend/internal/http/gateway"
 	"github.com/smallestfisher/relaydeck/backend/internal/store"
@@ -17,8 +18,9 @@ import (
 
 func New(cfg config.Config) http.Handler {
 	mux := http.NewServeMux()
-	memoryStore := store.NewMemoryStoreWithBootstrap(cfg.BootstrapOwnerEmail, cfg.BootstrapOwnerPassword)
-	adminStore := store.NewAdminStore(memoryStore, memoryStore)
+	gatewayStore := store.NewStaticGatewayConfigStore(nil, nil, nil)
+	usersStore := store.NewBootstrapUserStore(cfg.BootstrapOwnerEmail, cfg.BootstrapOwnerPassword, time.Now())
+	adminStore := store.NewAdminStore(usersStore, gatewayStore, nil)
 	if cfg.DatabaseURL != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -33,7 +35,11 @@ func New(cfg config.Config) http.Handler {
 		if err := users.BootstrapOwner(ctx, cfg.BootstrapOwnerEmail, cfg.BootstrapOwnerPassword); err != nil {
 			panic(fmt.Errorf("bootstrap owner: %w", err))
 		}
-		adminStore = store.NewAdminStore(memoryStore, users)
+		upstreams := postgres.NewUpstreamStore(db)
+		if err := upstreams.EnsureSchema(ctx); err != nil {
+			panic(fmt.Errorf("ensure upstream schema: %w", err))
+		}
+		adminStore = store.NewAdminStore(users, gatewayStore, upstreams)
 	}
 	var sessions auth.SessionStore = auth.NewMemorySessionStore(time.Now)
 	if cfg.RedisURL != "" {
@@ -48,7 +54,7 @@ func New(cfg config.Config) http.Handler {
 		}
 		sessions = redisSessions
 	}
-	gatewayHandler := gateway.New(memoryStore, upstream.NewClient(cfg.GatewayRequestTimeout), time.Now)
+	gatewayHandler := gateway.New(noGatewayConfig{}, upstream.NewClient(cfg.GatewayRequestTimeout), time.Now)
 	adminHandler := admin.New(adminStore, sessions, time.Now)
 
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -59,3 +65,10 @@ func New(cfg config.Config) http.Handler {
 	mux.Handle("/api/admin/", adminHandler)
 	return mux
 }
+
+type noGatewayConfig struct{}
+
+func (noGatewayConfig) APIKeys() []domain.APIKey     { return nil }
+func (noGatewayConfig) Models() []domain.Model       { return nil }
+func (noGatewayConfig) Sites() []domain.UpstreamSite { return nil }
+func (noGatewayConfig) Mappings() []domain.SiteModel { return nil }

@@ -7,14 +7,17 @@ import (
 	"testing"
 
 	"github.com/smallestfisher/relaydeck/backend/internal/auth"
-	"github.com/smallestfisher/relaydeck/backend/internal/store"
+	"github.com/smallestfisher/relaydeck/backend/internal/domain"
 )
 
 func TestSummaryReturnsGatewayConfigurationCounts(t *testing.T) {
-	memoryStore := store.NewMemoryStore()
+	adminStore := newTestAdminStore(t)
+	adminStore.apiKeys = []domain.APIKey{{ID: "key_1"}}
+	adminStore.models = []domain.Model{{ID: "model_1"}, {ID: "model_2"}}
+	adminStore.sites = []domain.UpstreamSite{{ID: "site_1"}}
 	sessions := auth.NewMemorySessionStore(fixedAdminNow)
-	handler := New(memoryStore, sessions, fixedAdminNow)
-	user, _ := memoryStore.UserByEmail(store.DefaultOwnerEmail)
+	handler := New(adminStore, sessions, fixedAdminNow)
+	user, _ := adminStore.UserByEmail("owner@example.com")
 	sessions.Create(auth.Session{
 		Token:     "summary-session",
 		UserID:    user.ID,
@@ -41,7 +44,7 @@ func TestSummaryReturnsGatewayConfigurationCounts(t *testing.T) {
 }
 
 func TestSummaryRejectsMissingSession(t *testing.T) {
-	handler := New(store.NewMemoryStore(), auth.NewMemorySessionStore(fixedAdminNow), fixedAdminNow)
+	handler := New(newTestAdminStore(t), auth.NewMemorySessionStore(fixedAdminNow), fixedAdminNow)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/admin/summary", nil)
 

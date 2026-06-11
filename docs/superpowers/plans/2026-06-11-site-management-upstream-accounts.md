@@ -49,8 +49,6 @@
 
 - `backend/migrations/0001_initial.sql`
 - `backend/internal/store/upstream.go`
-- `backend/internal/store/upstream_test.go`
-- `backend/internal/store/memory.go`
 - `backend/internal/store/admin.go`
 - `backend/internal/store/postgres/upstreams.go`
 - `backend/internal/store/postgres/upstreams_test.go`
@@ -58,14 +56,15 @@
 **Work**
 
 - Add upstream account store interface.
-- Implement in-memory upstream account store for dev and tests.
+- Do not extend legacy `MemoryStore`; remove the site-management dependency on prototype memory data.
 - Add PostgreSQL tables for upstream accounts, latest status snapshots, synced models, and operation events.
 - Implement PostgreSQL-backed upstream account store.
 - Extend `AdminStore` so admin handlers can access upstream account storage.
+- Keep Redis as the runtime/session/cache direction; do not add mock memory-backed upstream account behavior for the page.
 
 **Tests**
 
-- In-memory store tests cover create, update, list, delete, status upsert, model replacement, and event history.
+- Store contract tests cover create, update, list, delete, status upsert, model replacement, and event history.
 - PostgreSQL tests cover persistence when `DATABASE_URL` points to a test database, otherwise skip.
 
 **Verify**
