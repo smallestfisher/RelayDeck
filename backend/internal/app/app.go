@@ -11,6 +11,7 @@ import (
 	"github.com/smallestfisher/relaydeck/backend/internal/domain"
 	"github.com/smallestfisher/relaydeck/backend/internal/http/admin"
 	"github.com/smallestfisher/relaydeck/backend/internal/http/gateway"
+	"github.com/smallestfisher/relaydeck/backend/internal/secretbox"
 	"github.com/smallestfisher/relaydeck/backend/internal/store"
 	"github.com/smallestfisher/relaydeck/backend/internal/store/postgres"
 	"github.com/smallestfisher/relaydeck/backend/internal/upstream"
@@ -21,6 +22,15 @@ func New(cfg config.Config) http.Handler {
 	gatewayStore := store.NewStaticGatewayConfigStore(nil, nil, nil)
 	usersStore := store.NewBootstrapUserStore(cfg.BootstrapOwnerEmail, cfg.BootstrapOwnerPassword, time.Now())
 	adminStore := store.NewAdminStore(usersStore, gatewayStore, nil)
+	upstreamSecretKey := cfg.UpstreamSecretKey
+	if upstreamSecretKey == "" {
+		upstreamSecretKey = "0123456789abcdef0123456789abcdef"
+	}
+	upstreamSecrets, err := secretbox.New([]byte(upstreamSecretKey))
+	if err != nil {
+		panic(fmt.Errorf("create upstream secretbox: %w", err))
+	}
+	accountAdapters := upstream.DefaultAccountAdapterRegistry(nil, cfg.GatewayRequestTimeout)
 	if cfg.DatabaseURL != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -55,7 +65,7 @@ func New(cfg config.Config) http.Handler {
 		sessions = redisSessions
 	}
 	gatewayHandler := gateway.New(noGatewayConfig{}, upstream.NewClient(cfg.GatewayRequestTimeout), time.Now)
-	adminHandler := admin.New(adminStore, sessions, time.Now)
+	adminHandler := admin.NewWithDependencies(adminStore, sessions, time.Now, upstreamSecrets, accountAdapters)
 
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")

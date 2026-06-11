@@ -1,6 +1,12 @@
 package store
 
-import "github.com/smallestfisher/relaydeck/backend/internal/domain"
+import (
+	"errors"
+
+	"github.com/smallestfisher/relaydeck/backend/internal/domain"
+)
+
+var ErrNotFound = errors.New("not found")
 
 type UpstreamAccountStore interface {
 	ListUpstreamAccounts() []domain.UpstreamAccount

@@ -9,6 +9,7 @@ import (
 
 	"github.com/smallestfisher/relaydeck/backend/internal/auth"
 	"github.com/smallestfisher/relaydeck/backend/internal/domain"
+	"github.com/smallestfisher/relaydeck/backend/internal/store"
 )
 
 func TestAdminLoginSetsSessionCookie(t *testing.T) {
@@ -137,10 +138,11 @@ func fixedAdminNow() time.Time {
 }
 
 type testAdminStore struct {
-	users   []domain.User
-	apiKeys []domain.APIKey
-	models  []domain.Model
-	sites   []domain.UpstreamSite
+	users     []domain.User
+	apiKeys   []domain.APIKey
+	models    []domain.Model
+	sites     []domain.UpstreamSite
+	upstreams store.UpstreamAccountStore
 }
 
 func (s *testAdminStore) APIKeys() []domain.APIKey {
@@ -154,6 +156,9 @@ func (s *testAdminStore) Sites() []domain.UpstreamSite {
 }
 func (s *testAdminStore) Mappings() []domain.SiteModel { return nil }
 func (s *testAdminStore) Users() []domain.User         { return append([]domain.User(nil), s.users...) }
+func (s *testAdminStore) Upstreams() store.UpstreamAccountStore {
+	return s.upstreams
+}
 func (s *testAdminStore) UserByEmail(email string) (domain.User, bool) {
 	for _, user := range s.users {
 		if user.Email == email {

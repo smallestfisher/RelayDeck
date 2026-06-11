@@ -63,3 +63,29 @@ func TestAdminSummaryRouteIsMountedForLoggedInUser(t *testing.T) {
 		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
+
+func TestUpstreamAdminRouteIsMountedForLoggedInUser(t *testing.T) {
+	handler := New(config.Config{BootstrapOwnerEmail: "owner@example.com", BootstrapOwnerPassword: "change-me", UpstreamSecretKey: "0123456789abcdef0123456789abcdef"})
+	loginReq := httptest.NewRequest(http.MethodPost, "/api/admin/auth/login", strings.NewReader(`{"email":"owner@example.com","password":"change-me"}`))
+	loginReq.Header.Set("Content-Type", "application/json")
+	loginRec := httptest.NewRecorder()
+
+	handler.ServeHTTP(loginRec, loginReq)
+
+	if loginRec.Code != http.StatusOK {
+		t.Fatalf("expected login status 200, got %d: %s", loginRec.Code, loginRec.Body.String())
+	}
+	cookies := loginRec.Result().Cookies()
+	if len(cookies) == 0 {
+		t.Fatal("expected login to set a session cookie")
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/admin/upstreams/accounts", nil)
+	req.AddCookie(cookies[0])
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected upstream store unavailable without DATABASE_URL, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
