@@ -1,4 +1,4 @@
-import { AlertTriangle, Plus, RefreshCw, ShieldCheck, Signal, XCircle } from 'lucide-react';
+import { Activity, AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight, Plus, RefreshCw, RotateCcw, ShieldCheck, Signal, XCircle } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
@@ -12,6 +12,7 @@ import type {
   UpstreamAccount,
   UpstreamAccountEvent,
   UpstreamAccountInput,
+  UpstreamActionResult,
   UpstreamActionName,
   UpstreamAPIStatus,
   UpstreamBatchActionName,
@@ -32,6 +33,12 @@ const latencyOptions: Array<{ label: string; value: LatencyBand }> = [
   { label: '未知', value: 'unknown' },
 ];
 
+const pageSizeOptions = [
+  { label: '25 / 页', value: '25' },
+  { label: '50 / 页', value: '50' },
+  { label: '100 / 页', value: '100' },
+];
+
 export function SitesPage() {
   const [accounts, setAccounts] = useState<UpstreamAccount[]>([]);
   const [events, setEvents] = useState<UpstreamAccountEvent[]>([]);
@@ -46,15 +53,26 @@ export function SitesPage() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editingAccount, setEditingAccount] = useState<UpstreamAccount | null>(null);
   const [inspectAccount, setInspectAccount] = useState<UpstreamAccount | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<UpstreamAccount | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testingDraft, setTestingDraft] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState('');
+  const [batchNotice, setBatchNotice] = useState('');
   const [drawerError, setDrawerError] = useState('');
+  const [drawerNotice, setDrawerNotice] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
+  const [total, setTotal] = useState(0);
 
   useEffect(() => {
-    void loadAccounts();
-  }, []);
+    void loadAccounts(page, pageSize);
+  }, [page, pageSize]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [accountStatus, apiStatus, checkinStatus, latencyBand, platform, query]);
 
   const filteredAccounts = useMemo(() => {
     const keyword = query.trim().toLowerCase();
@@ -83,14 +101,23 @@ export function SitesPage() {
         account.status.checkinStatus === 'action_required' ||
         account.status.accountStatus === 'not_configured'
     ).length;
-    return { total: accounts.length, healthy, warning, manual };
-  }, [accounts]);
+    return { total, healthy, warning, manual };
+  }, [accounts, total]);
 
-  async function loadAccounts() {
+  async function loadAccounts(nextPage = page, nextPageSize = pageSize) {
     setLoading(true);
     setError('');
+    setBatchNotice('');
     try {
-      setAccounts(await adminApi.listUpstreamAccounts());
+      const offset = (nextPage - 1) * nextPageSize;
+      const payload = await adminApi.listUpstreamAccounts({ limit: nextPageSize, offset });
+      if (payload.items.length === 0 && payload.total > 0 && offset >= payload.total && nextPage > 1) {
+        setTotal(payload.total);
+        setPage(Math.ceil(payload.total / nextPageSize));
+        return;
+      }
+      setAccounts(payload.items);
+      setTotal(payload.total);
     } catch (err) {
       setError(err instanceof Error ? err.message : '加载站点失败');
     } finally {
@@ -99,13 +126,14 @@ export function SitesPage() {
   }
 
   async function saveAccount(input: UpstreamAccountInput) {
-    const validation = validateAccountInput(input, Boolean(editingAccount));
+    const validation = validateAccountInput(input, editingAccount);
     if (validation) {
       setDrawerError(validation);
       return;
     }
     setSaving(true);
     setDrawerError('');
+    setDrawerNotice('');
     try {
       if (editingAccount) {
         await adminApi.updateUpstreamAccount(editingAccount.id, input);
@@ -114,7 +142,7 @@ export function SitesPage() {
       }
       setDrawerOpen(false);
       setEditingAccount(null);
-      await loadAccounts();
+      await loadAccounts(page, pageSize);
     } catch (err) {
       setDrawerError(err instanceof Error ? err.message : '保存失败');
     } finally {
@@ -123,20 +151,49 @@ export function SitesPage() {
   }
 
   async function runDraftTest(input: UpstreamAccountInput) {
+    setDrawerError('');
+    setDrawerNotice('');
     if (editingAccount) {
-      await runAction(editingAccount, 'test-api');
+      const target = editingAccount;
+      setBusyIds((current) => [...new Set([...current, target.id])]);
+      try {
+        const result = await adminApi.runUpstreamAction(target.id, 'test-api');
+        applyActionResults([result]);
+        setDrawerNotice('API 测试完成');
+      } catch (err) {
+        setDrawerError(err instanceof Error ? err.message : 'API 测试失败');
+      } finally {
+        setBusyIds((current) => current.filter((id) => id !== target.id));
+      }
       return;
     }
-    const validation = validateAccountInput(input, false);
-    setDrawerError(validation || '请先保存站点后执行 API 测试');
-    setTestingDraft(false);
+    const validation = validateDraftTestInput(input);
+    if (validation) {
+      setDrawerError(validation);
+      return;
+    }
+    try {
+      const result = await adminApi.testUpstreamDraft(input);
+      if (result.status === 'success') {
+        setDrawerNotice('API 测试通过');
+      } else {
+        setDrawerError(result.message || 'API 测试失败');
+      }
+    } catch (err) {
+      setDrawerError(err instanceof Error ? err.message : 'API 测试失败');
+    }
   }
 
   async function runAction(account: UpstreamAccount, action: UpstreamActionName) {
     setBusyIds((current) => [...new Set([...current, account.id])]);
+    setError('');
+    setBatchNotice('');
     try {
-      await adminApi.runUpstreamAction(account.id, action);
-      await loadAccounts();
+      const result = await adminApi.runUpstreamAction(account.id, action);
+      applyActionResults([result]);
+      if (result.status !== 'success') {
+        setError(result.message || '操作失败');
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : '操作失败');
     } finally {
@@ -147,9 +204,12 @@ export function SitesPage() {
   async function runBatch(action: UpstreamBatchActionName) {
     if (selectedIds.length === 0) return;
     setBusyIds((current) => [...new Set([...current, ...selectedIds])]);
+    setError('');
+    setBatchNotice('');
     try {
-      await adminApi.runBatchUpstreamAction(selectedIds, action);
-      await loadAccounts();
+      const results = await adminApi.runBatchUpstreamAction(selectedIds, action);
+      applyActionResults(results);
+      setBatchNotice(batchSummary(results));
     } catch (err) {
       setError(err instanceof Error ? err.message : '批量操作失败');
     } finally {
@@ -158,16 +218,24 @@ export function SitesPage() {
   }
 
   async function deleteAccount(account: UpstreamAccount) {
-    if (!window.confirm(`删除站点 ${account.name}？`)) return;
-    setBusyIds((current) => [...current, account.id]);
+    setDeleteTarget(account);
+  }
+
+  async function confirmDeleteAccount() {
+    const target = deleteTarget;
+    if (!target) return;
+    setDeleting(true);
+    setBusyIds((current) => [...current, target.id]);
     try {
-      await adminApi.deleteUpstreamAccount(account.id);
-      setSelectedIds((current) => current.filter((id) => id !== account.id));
-      await loadAccounts();
+      await adminApi.deleteUpstreamAccount(target.id);
+      setSelectedIds((current) => current.filter((id) => id !== target.id));
+      setDeleteTarget(null);
+      await loadAccounts(page, pageSize);
     } catch (err) {
       setError(err instanceof Error ? err.message : '删除失败');
     } finally {
-      setBusyIds((current) => current.filter((id) => id !== account.id));
+      setBusyIds((current) => current.filter((id) => id !== target.id));
+      setDeleting(false);
     }
   }
 
@@ -190,17 +258,33 @@ export function SitesPage() {
     setSelectedIds(allSelected ? selectedIds.filter((id) => !visibleIds.includes(id)) : [...new Set([...selectedIds, ...visibleIds])]);
   }
 
+  function applyActionResults(results: UpstreamActionResult[]) {
+    setAccounts((current) =>
+      current.map((account) => {
+        const result = results.find((item) => item.id === account.id);
+        return result?.accountStatus ? { ...account, status: result.accountStatus } : account;
+      })
+    );
+  }
+
   function openCreateDrawer() {
     setEditingAccount(null);
     setDrawerError('');
+    setDrawerNotice('');
     setDrawerOpen(true);
   }
 
   function openEditDrawer(account: UpstreamAccount) {
     setEditingAccount(account);
     setDrawerError('');
+    setDrawerNotice('');
     setDrawerOpen(true);
   }
+
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const pageStart = total === 0 ? 0 : (page - 1) * pageSize + 1;
+  const pageEnd = Math.min(total, page * pageSize);
+  const selectedActionDisabled = selectedIds.length === 0 || busyIds.length > 0;
 
   return (
     <div className="space-y-5">
@@ -244,20 +328,27 @@ export function SitesPage() {
             onChange={(event) => setCheckinStatus(event.target.value as UpstreamCheckinStatus | 'all')}
           />
           <SelectControl className="w-36" options={latencyOptions} value={latencyBand} onChange={(event) => setLatencyBand(event.target.value as LatencyBand)} />
-          <div className="ml-auto flex gap-2">
-            <Button variant="secondary" icon={<RefreshCw className="h-4 w-4" />} onClick={loadAccounts} disabled={loading}>
+          <div className="ml-auto flex flex-wrap justify-end gap-2">
+            <Button variant="secondary" icon={<RefreshCw className="h-4 w-4" />} onClick={() => void loadAccounts(page, pageSize)} disabled={loading}>
               刷新
             </Button>
-            <Button variant="secondary" onClick={() => runBatch('test-api')} disabled={selectedIds.length === 0}>
+            <Button variant="secondary" icon={<Activity className="h-4 w-4" />} onClick={() => runBatch('test-api')} disabled={selectedActionDisabled}>
               批量检测
             </Button>
-            <Button variant="secondary" onClick={() => runBatch('sync-models')} disabled={selectedIds.length === 0}>
+            <Button variant="secondary" icon={<RefreshCw className="h-4 w-4" />} onClick={() => runBatch('sync-models')} disabled={selectedActionDisabled}>
               批量同步
+            </Button>
+            <Button variant="secondary" icon={<RotateCcw className="h-4 w-4" />} onClick={() => runBatch('refresh-quota')} disabled={selectedActionDisabled}>
+              批量额度
+            </Button>
+            <Button variant="secondary" icon={<CheckCircle2 className="h-4 w-4" />} onClick={() => runBatch('checkin')} disabled={selectedActionDisabled}>
+              批量签到
             </Button>
           </div>
         </div>
 
         {error && <div className="mb-4 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">{error}</div>}
+        {batchNotice && <div className="mb-4 rounded-lg border border-success/30 bg-success/10 px-3 py-2 text-sm text-success">{batchNotice}</div>}
 
         {loading ? (
           <div className="rounded-lg border border-line bg-elevated/45 py-12 text-center text-sm text-muted">加载中...</div>
@@ -277,13 +368,28 @@ export function SitesPage() {
           />
         )}
 
-        <div className="mt-4 flex items-center justify-between text-sm text-muted">
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm text-muted">
           <span>
-            共 {filteredAccounts.length} 条记录，已选 {selectedIds.length} 条
+            共 {formatNumber(total)} 条记录，当前 {formatNumber(pageStart)}-{formatNumber(pageEnd)}，已选 {selectedIds.length} 条
           </span>
-          <div className="flex items-center gap-2">
-            <Button variant="secondary" className="h-9 w-9 p-0">
-              1
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <SelectControl
+              className="w-28"
+              options={pageSizeOptions}
+              value={String(pageSize)}
+              onChange={(event) => {
+                setPageSize(Number(event.target.value));
+                setPage(1);
+              }}
+            />
+            <Button variant="icon" className="h-9 w-9 p-0" disabled={page <= 1 || loading} onClick={() => setPage((current) => Math.max(1, current - 1))} aria-label="上一页">
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <span className="min-w-20 text-center text-sm text-muted">
+              {page} / {totalPages}
+            </span>
+            <Button variant="icon" className="h-9 w-9 p-0" disabled={page >= totalPages || loading} onClick={() => setPage((current) => Math.min(totalPages, current + 1))} aria-label="下一页">
+              <ChevronRight className="h-4 w-4" />
             </Button>
           </div>
         </div>
@@ -295,6 +401,7 @@ export function SitesPage() {
         saving={saving}
         testing={testingDraft}
         error={drawerError}
+        notice={drawerNotice}
         onClose={() => setDrawerOpen(false)}
         onSave={saveAccount}
         onTestAPI={(input) => {
@@ -302,6 +409,35 @@ export function SitesPage() {
           void runDraftTest(input).finally(() => setTestingDraft(false));
         }}
       />
+
+      <Drawer
+        open={Boolean(deleteTarget)}
+        title="删除站点"
+        subtitle={deleteTarget?.name}
+        onClose={() => {
+          if (!deleting) setDeleteTarget(null);
+        }}
+        footer={
+          <div className="flex justify-end gap-3">
+            <Button onClick={() => setDeleteTarget(null)} disabled={deleting}>
+              取消
+            </Button>
+            <Button variant="danger" onClick={() => void confirmDeleteAccount()} disabled={deleting}>
+              {deleting ? '删除中' : '确认删除'}
+            </Button>
+          </div>
+        }
+      >
+        <div className="rounded-lg border border-danger/25 bg-danger/10 p-4 text-sm leading-6 text-danger">
+          删除后会移除该站点的状态、模型与操作历史。此操作不可撤销。
+        </div>
+        {deleteTarget && (
+          <div className="mt-4 rounded-lg border border-line bg-elevated/45 p-4 text-sm text-muted">
+            <div className="font-medium text-text">{deleteTarget.name}</div>
+            <div className="mt-1 break-all">{deleteTarget.baseUrl}</div>
+          </div>
+        )}
+      </Drawer>
 
       <Drawer open={Boolean(inspectAccount)} title="站点历史" subtitle={inspectAccount?.name} onClose={() => setInspectAccount(null)}>
         <div className="space-y-3">
@@ -344,11 +480,61 @@ function latencyMatches(latencyMs: number, band: LatencyBand): boolean {
   return true;
 }
 
-function validateAccountInput(input: UpstreamAccountInput, editing: boolean): string {
+function batchSummary(results: UpstreamActionResult[]): string {
+  const success = results.filter((item) => item.status === 'success').length;
+  const failed = results.length - success;
+  const actionRequired = results.filter(
+    (item) => item.accountStatus?.accountStatus === 'action_required' || item.accountStatus?.checkinStatus === 'action_required'
+  ).length;
+  const expired = results.filter((item) => item.accountStatus?.accountStatus === 'expired').length;
+  const details = [`成功 ${success}`, `失败 ${failed}`];
+  if (actionRequired > 0) details.push(`需人工处理 ${actionRequired}`);
+  if (expired > 0) details.push(`凭据过期 ${expired}`);
+  return `批量操作完成：${details.join('，')}`;
+}
+
+function validateAccountInput(input: UpstreamAccountInput, editingAccount: UpstreamAccount | null): string {
   if (!input.name.trim()) return '请填写站点名称';
   if (!input.code.trim()) return '请填写站点代码';
   if (!input.baseUrl.trim()) return '请填写 Base URL';
-  if (!editing && !input.apiKey?.trim()) return '请填写 API Key';
-  if (input.accountCredentialKind !== 'none' && !input.accountCredential?.trim()) return '请填写账号凭据或选择不配置';
+  if (!editingAccount && !input.apiKey?.trim()) return '请填写 API Key';
+  const credential = input.accountCredential?.trim() ?? '';
+  const credentialKindChanged = Boolean(editingAccount && input.accountCredentialKind !== editingAccount.accountCredentialKind);
+  const mustProvideCredential = !editingAccount || credentialKindChanged || credential !== '';
+  if (input.accountCredentialKind === 'none') return '';
+  if (!credential && mustProvideCredential) return '请填写账号凭据或选择不配置';
+  if (input.accountCredentialKind === 'new_api_access_token' && mustProvideCredential) {
+    const parsed = parseJSONCredential(credential);
+    if (!stringField(parsed, 'access_token') || !stringField(parsed, 'user_id')) {
+      return '请填写 New API Access Token 和 User ID';
+    }
+  }
+  if (input.accountCredentialKind === 'sub2api_refresh_token' && mustProvideCredential) {
+    const parsed = parseJSONCredential(credential);
+    if (!stringField(parsed, 'refresh_token').startsWith('rt_')) {
+      return '请填写 Sub2API Refresh Token';
+    }
+  }
+  return '';
+}
+
+function validateDraftTestInput(input: UpstreamAccountInput): string {
+  if (!input.baseUrl.trim()) return '请填写 Base URL';
+  if (!input.apiKey?.trim()) return '请填写 API Key';
+  return '';
+}
+
+function parseJSONCredential(value: string): Record<string, unknown> {
+  try {
+    return JSON.parse(value) as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+}
+
+function stringField(payload: Record<string, unknown>, key: string): string {
+  const value = payload[key];
+  if (typeof value === 'string') return value.trim();
+  if (typeof value === 'number') return String(value);
   return '';
 }

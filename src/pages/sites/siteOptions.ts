@@ -18,6 +18,8 @@ export const platformLabels: Record<UpstreamPlatformKind, string> = {
 
 export const credentialKindOptions: Array<{ label: string; value: UpstreamCredentialKind }> = [
   { label: '不配置', value: 'none' },
+  { label: 'New API Access Token', value: 'new_api_access_token' },
+  { label: 'Sub2API Refresh Token', value: 'sub2api_refresh_token' },
   { label: 'Cookie / Session Header', value: 'cookie' },
   { label: 'Access Token', value: 'access_token' },
   { label: 'Refresh Token', value: 'refresh_token' },

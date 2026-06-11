@@ -19,15 +19,13 @@ func TestUserStoreBootstrapOwnerPersistsAdmin(t *testing.T) {
 	if !strings.Contains(databaseURL, "test") {
 		t.Fatalf("DATABASE_URL must point to a test database, got %q", databaseURL)
 	}
+	databaseURL = isolatedDatabaseURL(t, databaseURL)
 	ctx := context.Background()
 	db, err := Open(ctx, databaseURL)
 	if err != nil {
 		t.Fatalf("open postgres: %v", err)
 	}
 	defer db.Close()
-	if _, err := db.ExecContext(ctx, `DROP TABLE IF EXISTS users CASCADE`); err != nil {
-		t.Fatalf("reset test users table: %v", err)
-	}
 	store := NewUserStore(db)
 	if err := store.EnsureSchema(ctx); err != nil {
 		t.Fatalf("ensure schema: %v", err)

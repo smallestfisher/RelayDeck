@@ -15,7 +15,7 @@ import (
 
 type AccountAdapter interface {
 	TestAPI(ctx context.Context, account domain.UpstreamAccount, apiKey string) (domain.UpstreamAccountStatus, error)
-	TestAccountCredential(ctx context.Context, account domain.UpstreamAccount, credential string) (domain.UpstreamAccountStatus, error)
+	TestAccountCredential(ctx context.Context, account domain.UpstreamAccount, credential string) (domain.AccountCredentialTestResult, error)
 	SyncModels(ctx context.Context, account domain.UpstreamAccount, apiKey string) (domain.ModelSyncResult, domain.UpstreamAccountStatus, error)
 	RefreshQuota(ctx context.Context, account domain.UpstreamAccount, apiKey string, accountCredential string) (domain.QuotaRefreshResult, error)
 	Checkin(ctx context.Context, account domain.UpstreamAccount, accountCredential string) (domain.CheckinResult, error)
@@ -65,6 +65,15 @@ type adapterResponse struct {
 	body       []byte
 }
 
+type newAPIAccessCredential struct {
+	AccessToken string `json:"access_token"`
+	UserID      string `json:"user_id"`
+}
+
+type sub2APIRefreshCredential struct {
+	RefreshToken string `json:"refresh_token"`
+}
+
 func (a accountHTTPAdapter) do(ctx context.Context, method string, account domain.UpstreamAccount, path string, authHeader string, body io.Reader) (adapterResponse, error) {
 	if strings.TrimSpace(account.BaseURL) == "" {
 		return adapterResponse{}, errors.New("upstream base url is required")
@@ -83,6 +92,36 @@ func (a accountHTTPAdapter) do(ctx context.Context, method string, account domai
 	if authHeader != "" {
 		req.Header.Set("Authorization", authHeader)
 	}
+	resp, err := a.httpClient.Do(req)
+	if err != nil {
+		return adapterResponse{}, err
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return adapterResponse{}, err
+	}
+	return adapterResponse{statusCode: resp.StatusCode, body: respBody}, nil
+}
+
+func (a accountHTTPAdapter) doNewAPIUser(ctx context.Context, method string, account domain.UpstreamAccount, path string, credential newAPIAccessCredential, body io.Reader) (adapterResponse, error) {
+	if strings.TrimSpace(account.BaseURL) == "" {
+		return adapterResponse{}, errors.New("upstream base url is required")
+	}
+	ctx, cancel := context.WithTimeout(ctx, requestTimeout(a.timeout))
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, method, strings.TrimRight(account.BaseURL, "/")+path, body)
+	if err != nil {
+		return adapterResponse{}, err
+	}
+	req.Header.Set("Accept", "application/json")
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	req.Header.Set("Authorization", credential.AccessToken)
+	req.Header.Set("New-Api-User", credential.UserID)
 	resp, err := a.httpClient.Do(req)
 	if err != nil {
 		return adapterResponse{}, err
@@ -143,6 +182,76 @@ func applyAccountCredential(req *http.Request, credential string) {
 		return
 	}
 	req.Header.Set("Authorization", "Bearer "+credential)
+}
+
+func parseNewAPIAccessCredential(credential string) (newAPIAccessCredential, error) {
+	credential = strings.TrimSpace(credential)
+	if credential == "" {
+		return newAPIAccessCredential{}, errors.New("account credential is not configured")
+	}
+	payload := map[string]any{}
+	decoder := json.NewDecoder(strings.NewReader(credential))
+	decoder.UseNumber()
+	if err := decoder.Decode(&payload); err != nil {
+		return newAPIAccessCredential{}, errors.New("new-api account credential must be JSON with access_token and user_id")
+	}
+	accessToken, _ := payload["access_token"].(string)
+	userID, ok := userIDString(payload["user_id"])
+	if strings.TrimSpace(accessToken) == "" || !ok || strings.TrimSpace(userID) == "" {
+		return newAPIAccessCredential{}, errors.New("new-api account credential requires access_token and user_id")
+	}
+	return newAPIAccessCredential{AccessToken: strings.TrimSpace(accessToken), UserID: strings.TrimSpace(userID)}, nil
+}
+
+func parseSub2APIRefreshCredential(credential string) (sub2APIRefreshCredential, error) {
+	credential = strings.TrimSpace(credential)
+	if credential == "" {
+		return sub2APIRefreshCredential{}, errors.New("account credential is not configured")
+	}
+	if strings.HasPrefix(credential, "rt_") {
+		return sub2APIRefreshCredential{RefreshToken: credential}, nil
+	}
+	payload := map[string]any{}
+	if err := json.Unmarshal([]byte(credential), &payload); err != nil {
+		return sub2APIRefreshCredential{}, errors.New("sub2api account credential must be JSON with refresh_token")
+	}
+	refreshToken, _ := payload["refresh_token"].(string)
+	refreshToken = strings.TrimSpace(refreshToken)
+	if !strings.HasPrefix(refreshToken, "rt_") {
+		return sub2APIRefreshCredential{}, errors.New("sub2api refresh token must start with rt_")
+	}
+	return sub2APIRefreshCredential{RefreshToken: refreshToken}, nil
+}
+
+func encodeSub2APIRefreshCredential(refreshToken string) string {
+	payload, err := json.Marshal(sub2APIRefreshCredential{RefreshToken: strings.TrimSpace(refreshToken)})
+	if err != nil {
+		return ""
+	}
+	return string(payload)
+}
+
+func userIDString(value any) (string, bool) {
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed), strings.TrimSpace(typed) != ""
+	case json.Number:
+		if i, err := typed.Int64(); err == nil {
+			return fmt.Sprintf("%d", i), true
+		}
+		return strings.TrimSpace(typed.String()), strings.TrimSpace(typed.String()) != ""
+	case float64:
+		if typed == float64(int64(typed)) {
+			return fmt.Sprintf("%d", int64(typed)), true
+		}
+		return "", false
+	case int:
+		return fmt.Sprintf("%d", typed), true
+	case int64:
+		return fmt.Sprintf("%d", typed), true
+	default:
+		return "", false
+	}
 }
 
 func decodeJSONBody(body []byte) map[string]any {
@@ -273,6 +382,47 @@ func requiresHumanAction(message string) bool {
 		strings.Contains(lower, "qr")
 }
 
+func authMessageIndicatesCredentialProblem(message string) bool {
+	lower := strings.ToLower(message)
+	return strings.Contains(lower, "access token invalid") ||
+		strings.Contains(lower, "access_token_invalid") ||
+		strings.Contains(lower, "invalid token") ||
+		strings.Contains(lower, "token invalid") ||
+		strings.Contains(lower, "token expired") ||
+		strings.Contains(lower, "unauthorized") ||
+		strings.Contains(lower, "forbidden") ||
+		strings.Contains(lower, "new-api-user") ||
+		strings.Contains(lower, "user id") ||
+		strings.Contains(lower, "mismatch") ||
+		strings.Contains(lower, "未登录") ||
+		strings.Contains(lower, "无权") ||
+		strings.Contains(lower, "不匹配")
+}
+
+func responseSucceeded(body []byte) bool {
+	payload := decodeJSONBody(body)
+	success, ok := payload["success"].(bool)
+	if ok {
+		return success
+	}
+	if code, ok := numberFromAny(payload["code"]); ok {
+		return code == 0
+	}
+	return true
+}
+
+func responseExplicitlyFailed(body []byte) bool {
+	payload := decodeJSONBody(body)
+	success, ok := payload["success"].(bool)
+	if ok {
+		return !success
+	}
+	if code, ok := numberFromAny(payload["code"]); ok {
+		return code != 0
+	}
+	return false
+}
+
 func healthyAPIStatus(accountID string, modelCount int, latencyMS int) domain.UpstreamAccountStatus {
 	return domain.UpstreamAccountStatus{
 		UpstreamAccountID: accountID,
@@ -337,6 +487,25 @@ func quotaAmount(body []byte) float64 {
 		}
 	}
 	return 0
+}
+
+func newAPISelfQuotaAmount(body []byte) float64 {
+	payload := decodeJSONBody(body)
+	candidates := []map[string]any{payload}
+	if data, ok := payload["data"].(map[string]any); ok {
+		candidates = append([]map[string]any{data}, candidates...)
+	}
+	for _, candidate := range candidates {
+		quota, hasQuota := numberFromAny(candidate["quota"])
+		usedQuota, hasUsedQuota := numberFromAny(candidate["used_quota"])
+		if hasQuota && hasUsedQuota {
+			return quota - usedQuota
+		}
+		if hasQuota {
+			return quota
+		}
+	}
+	return quotaAmount(body)
 }
 
 func numberFromAny(value any) (float64, bool) {

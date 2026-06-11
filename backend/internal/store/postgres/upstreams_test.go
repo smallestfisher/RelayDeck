@@ -6,10 +6,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/smallestfisher/relaydeck/backend/internal/config"
 	"github.com/smallestfisher/relaydeck/backend/internal/domain"
 )
 
 func TestUpstreamStorePersistsAccountStateModelsAndEvents(t *testing.T) {
+	config.LoadDotEnv()
 	databaseURL := os.Getenv("DATABASE_URL")
 	if databaseURL == "" {
 		t.Skip("DATABASE_URL is not set")
@@ -17,6 +19,7 @@ func TestUpstreamStorePersistsAccountStateModelsAndEvents(t *testing.T) {
 	if !strings.Contains(databaseURL, "test") {
 		t.Fatalf("DATABASE_URL must point to a test database, got %q", databaseURL)
 	}
+	databaseURL = isolatedDatabaseURL(t, databaseURL)
 
 	ctx := context.Background()
 	db, err := Open(ctx, databaseURL)
@@ -24,15 +27,6 @@ func TestUpstreamStorePersistsAccountStateModelsAndEvents(t *testing.T) {
 		t.Fatalf("open postgres: %v", err)
 	}
 	defer db.Close()
-
-	if _, err := db.ExecContext(ctx, `
-DROP TABLE IF EXISTS upstream_account_events;
-DROP TABLE IF EXISTS upstream_synced_models;
-DROP TABLE IF EXISTS upstream_account_status;
-DROP TABLE IF EXISTS upstream_accounts;
-`); err != nil {
-		t.Fatalf("reset upstream tables: %v", err)
-	}
 
 	upstreams := NewUpstreamStore(db)
 	if err := upstreams.EnsureSchema(ctx); err != nil {
@@ -44,6 +38,7 @@ DROP TABLE IF EXISTS upstream_accounts;
 
 type upstreamStoreContract interface {
 	ListUpstreamAccounts() []domain.UpstreamAccount
+	ListUpstreamAccountsPage(limit int, offset int) ([]domain.UpstreamAccount, int)
 	UpstreamAccount(id string) (domain.UpstreamAccount, bool)
 	CreateUpstreamAccount(account domain.UpstreamAccount) (domain.UpstreamAccount, error)
 	UpdateUpstreamAccount(account domain.UpstreamAccount) (domain.UpstreamAccount, error)
@@ -163,5 +158,51 @@ func runUpstreamStoreBehavior(t *testing.T, upstreams upstreamStoreContract) {
 	}
 	if models := upstreams.UpstreamModels(created.ID); len(models) != 0 {
 		t.Fatalf("expected account models to be deleted, got %+v", models)
+	}
+}
+
+func TestUpstreamStoreListsAccountsWithPagination(t *testing.T) {
+	config.LoadDotEnv()
+	databaseURL := os.Getenv("DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("DATABASE_URL is not set")
+	}
+	if !strings.Contains(databaseURL, "test") {
+		t.Fatalf("DATABASE_URL must point to a test database, got %q", databaseURL)
+	}
+	databaseURL = isolatedDatabaseURL(t, databaseURL)
+
+	ctx := context.Background()
+	db, err := Open(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("open postgres: %v", err)
+	}
+	defer db.Close()
+
+	upstreams := NewUpstreamStore(db)
+	if err := upstreams.EnsureSchema(ctx); err != nil {
+		t.Fatalf("ensure schema: %v", err)
+	}
+
+	for _, account := range []domain.UpstreamAccount{
+		{Name: "Priority 30", Code: "priority-30", PlatformKind: domain.PlatformKindNewAPI, BaseURL: "https://one.example.com", Enabled: true, IncludeInRouting: true, Priority: 30, APIKeyEncrypted: "encrypted-1"},
+		{Name: "Priority 20", Code: "priority-20", PlatformKind: domain.PlatformKindNewAPI, BaseURL: "https://two.example.com", Enabled: true, IncludeInRouting: true, Priority: 20, APIKeyEncrypted: "encrypted-2"},
+		{Name: "Priority 10", Code: "priority-10", PlatformKind: domain.PlatformKindNewAPI, BaseURL: "https://three.example.com", Enabled: true, IncludeInRouting: true, Priority: 10, APIKeyEncrypted: "encrypted-3"},
+	} {
+		if _, err := upstreams.CreateUpstreamAccount(account); err != nil {
+			t.Fatalf("create account: %v", err)
+		}
+	}
+
+	page, total := upstreams.ListUpstreamAccountsPage(2, 1)
+
+	if total != 3 {
+		t.Fatalf("expected total 3, got %d", total)
+	}
+	if len(page) != 2 {
+		t.Fatalf("expected two page items, got %+v", page)
+	}
+	if page[0].Code != "priority-20" || page[1].Code != "priority-10" {
+		t.Fatalf("expected priority ordered second page slice, got %+v", page)
 	}
 }

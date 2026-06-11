@@ -111,6 +111,79 @@ func TestCreateListAndUpdateUpstreamAccountRedactsSecrets(t *testing.T) {
 	}
 }
 
+func TestListUpstreamAccountsSupportsLimitOffsetAndTotal(t *testing.T) {
+	handler, sessions, adminStore, fakeStore := newUpstreamTestHandlerParts(t)
+	cookie := createTestSession(t, sessions, adminStore)
+	for _, name := range []string{"Account 1", "Account 2", "Account 3"} {
+		_, err := fakeStore.CreateUpstreamAccount(domain.UpstreamAccount{
+			Name:             name,
+			Code:             strings.ToLower(strings.ReplaceAll(name, " ", "-")),
+			PlatformKind:     domain.PlatformKindNewAPI,
+			BaseURL:          "https://new-api.example.com",
+			Enabled:          true,
+			IncludeInRouting: true,
+			APIKeyEncrypted:  mustEncryptTestSecret(t, "sk-test-secret"),
+			APIKeyPrefix:     "sk-test",
+		})
+		if err != nil {
+			t.Fatalf("create account: %v", err)
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/admin/upstreams/accounts?limit=2&offset=1", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected list 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var payload struct {
+		Items  []upstreamAccountResponse `json:"items"`
+		Total  int                       `json:"total"`
+		Limit  int                       `json:"limit"`
+		Offset int                       `json:"offset"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.Total != 3 || payload.Limit != 2 || payload.Offset != 1 {
+		t.Fatalf("unexpected pagination metadata: %+v", payload)
+	}
+	if len(payload.Items) != 2 {
+		t.Fatalf("expected two paginated accounts, got %d", len(payload.Items))
+	}
+}
+
+func TestDraftUpstreamAPITestDoesNotPersistAccount(t *testing.T) {
+	handler, sessions, adminStore, fakeStore := newUpstreamTestHandlerParts(t)
+	cookie := createTestSession(t, sessions, adminStore)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/upstreams/test", strings.NewReader(`{
+		"platform_kind":"new_api",
+		"base_url":"https://new-api.example.com/",
+		"api_key":"sk-draft-secret"
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected draft test 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var result actionResult
+	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if result.Status != "success" {
+		t.Fatalf("expected successful draft test, got %+v", result)
+	}
+	if len(fakeStore.accounts) != 0 {
+		t.Fatalf("expected draft test not to persist accounts, got %+v", fakeStore.accounts)
+	}
+}
+
 func TestUpstreamActionEndpointsUpdateStatusModelsAndEvents(t *testing.T) {
 	handler, sessions, adminStore, fakeStore := newUpstreamTestHandlerParts(t)
 	cookie := createTestSession(t, sessions, adminStore)
@@ -156,6 +229,80 @@ func TestBatchUpstreamActionReturnsPerAccountResults(t *testing.T) {
 	}
 }
 
+func TestUpstreamActionResponseIncludesAccountStatusSnapshot(t *testing.T) {
+	handler, sessions, adminStore, fakeStore := newUpstreamTestHandlerParts(t)
+	cookie := createTestSession(t, sessions, adminStore)
+	account := createStoredUpstreamAccount(t, fakeStore)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/upstreams/accounts/"+account.ID+"/test-account", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected action 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var result actionResult
+	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+		t.Fatalf("decode action response: %v", err)
+	}
+	if result.AccountStatus == nil || result.AccountStatus.AccountStatus != domain.AccountCredentialStatusValid {
+		t.Fatalf("expected account status snapshot, got %+v", result)
+	}
+
+	batchReq := httptest.NewRequest(http.MethodPost, "/api/admin/upstreams/accounts/batch/test-api", strings.NewReader(`{"ids":["`+account.ID+`"]}`))
+	batchReq.Header.Set("Content-Type", "application/json")
+	batchReq.AddCookie(cookie)
+	batchRec := httptest.NewRecorder()
+	handler.ServeHTTP(batchRec, batchReq)
+	if batchRec.Code != http.StatusOK {
+		t.Fatalf("expected batch 200, got %d: %s", batchRec.Code, batchRec.Body.String())
+	}
+	var batchPayload struct {
+		Results []actionResult `json:"results"`
+	}
+	if err := json.Unmarshal(batchRec.Body.Bytes(), &batchPayload); err != nil {
+		t.Fatalf("decode batch response: %v", err)
+	}
+	if len(batchPayload.Results) != 1 || batchPayload.Results[0].AccountStatus == nil || batchPayload.Results[0].AccountStatus.APIStatus != domain.UpstreamAPIStatusHealthy {
+		t.Fatalf("expected batch account status snapshot, got %+v", batchPayload)
+	}
+}
+
+func TestUpstreamActionPersistsRotatedAccountCredential(t *testing.T) {
+	handler, sessions, adminStore, fakeStore := newUpstreamTestHandlerPartsWithAdapter(t, rotatingAccountAdapter{})
+	cookie := createTestSession(t, sessions, adminStore)
+	account := createStoredUpstreamAccount(t, fakeStore)
+	account.AccountCredentialKind = domain.CredentialKindSub2APIRefreshToken
+	account.AccountCredentialEncrypted = mustEncryptTestSecret(t, `{"refresh_token":"rt_old"}`)
+	if _, err := fakeStore.UpdateUpstreamAccount(account); err != nil {
+		t.Fatalf("update test account: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/upstreams/accounts/"+account.ID+"/test-account", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected action 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "rt_new") {
+		t.Fatalf("response leaked rotated credential: %s", rec.Body.String())
+	}
+	updated, _ := fakeStore.UpstreamAccount(account.ID)
+	if updated.AccountCredentialKind != domain.CredentialKindSub2APIRefreshToken {
+		t.Fatalf("unexpected credential kind: %s", updated.AccountCredentialKind)
+	}
+	decrypted := mustDecryptTestSecret(t, updated.AccountCredentialEncrypted)
+	if !strings.Contains(decrypted, "rt_new") {
+		t.Fatalf("expected rotated credential to be persisted, got %q", decrypted)
+	}
+	for _, event := range fakeStore.UpstreamAccountEvents(account.ID, 10) {
+		if strings.Contains(event.Message, "rt_new") {
+			t.Fatalf("event leaked rotated credential: %+v", event)
+		}
+	}
+}
+
 func newUpstreamTestHandler(t *testing.T) http.Handler {
 	t.Helper()
 	handler, _, _, _ := newUpstreamTestHandlerParts(t)
@@ -163,6 +310,11 @@ func newUpstreamTestHandler(t *testing.T) http.Handler {
 }
 
 func newUpstreamTestHandlerParts(t *testing.T) (http.Handler, auth.SessionStore, *testAdminStore, *fakeUpstreamStore) {
+	t.Helper()
+	return newUpstreamTestHandlerPartsWithAdapter(t, fakeAccountAdapter{})
+}
+
+func newUpstreamTestHandlerPartsWithAdapter(t *testing.T, adapter upstream.AccountAdapter) (http.Handler, auth.SessionStore, *testAdminStore, *fakeUpstreamStore) {
 	t.Helper()
 	adminStore := newTestAdminStore(t)
 	fakeStore := newFakeUpstreamStore()
@@ -173,7 +325,8 @@ func newUpstreamTestHandlerParts(t *testing.T) (http.Handler, auth.SessionStore,
 		t.Fatalf("secretbox: %v", err)
 	}
 	registry := upstream.NewAccountAdapterRegistry(map[domain.UpstreamPlatformKind]upstream.AccountAdapter{
-		domain.PlatformKindNewAPI: fakeAccountAdapter{},
+		domain.PlatformKindNewAPI:  adapter,
+		domain.PlatformKindSub2API: adapter,
 	})
 	return NewWithDependencies(adminStore, sessions, fixedAdminNow, box, registry), sessions, adminStore, fakeStore
 }
@@ -224,6 +377,19 @@ func mustEncryptTestSecret(t *testing.T, plaintext string) string {
 	return encrypted
 }
 
+func mustDecryptTestSecret(t *testing.T, ciphertext string) string {
+	t.Helper()
+	box, err := secretbox.New([]byte("0123456789abcdef0123456789abcdef"))
+	if err != nil {
+		t.Fatalf("secretbox: %v", err)
+	}
+	plaintext, err := box.Decrypt(ciphertext)
+	if err != nil {
+		t.Fatalf("decrypt: %v", err)
+	}
+	return plaintext
+}
+
 func jsonField(t *testing.T, body []byte, field string) string {
 	t.Helper()
 	payload := map[string]any{}
@@ -239,8 +405,8 @@ type fakeAccountAdapter struct{}
 func (fakeAccountAdapter) TestAPI(context.Context, domain.UpstreamAccount, string) (domain.UpstreamAccountStatus, error) {
 	return domain.UpstreamAccountStatus{APIStatus: domain.UpstreamAPIStatusHealthy, CheckinStatus: domain.CheckinStatusUnsupported}, nil
 }
-func (fakeAccountAdapter) TestAccountCredential(context.Context, domain.UpstreamAccount, string) (domain.UpstreamAccountStatus, error) {
-	return domain.UpstreamAccountStatus{AccountStatus: domain.AccountCredentialStatusValid}, nil
+func (fakeAccountAdapter) TestAccountCredential(context.Context, domain.UpstreamAccount, string) (domain.AccountCredentialTestResult, error) {
+	return domain.AccountCredentialTestResult{Status: domain.UpstreamAccountStatus{AccountStatus: domain.AccountCredentialStatusValid}}, nil
 }
 func (fakeAccountAdapter) SyncModels(context.Context, domain.UpstreamAccount, string) (domain.ModelSyncResult, domain.UpstreamAccountStatus, error) {
 	models := []domain.UpstreamSyncedModel{{
@@ -261,6 +427,20 @@ func (fakeAccountAdapter) RefreshQuota(context.Context, domain.UpstreamAccount, 
 }
 func (fakeAccountAdapter) Checkin(context.Context, domain.UpstreamAccount, string) (domain.CheckinResult, error) {
 	return domain.CheckinResult{Status: domain.CheckinStatusUnsupported}, nil
+}
+
+type rotatingAccountAdapter struct {
+	fakeAccountAdapter
+}
+
+func (rotatingAccountAdapter) TestAccountCredential(context.Context, domain.UpstreamAccount, string) (domain.AccountCredentialTestResult, error) {
+	return domain.AccountCredentialTestResult{
+		Status: domain.UpstreamAccountStatus{AccountStatus: domain.AccountCredentialStatusValid},
+		CredentialUpdate: &domain.UpstreamCredentialUpdate{
+			Kind:      domain.CredentialKindSub2APIRefreshToken,
+			Plaintext: `{"refresh_token":"rt_new"}`,
+		},
+	}, nil
 }
 
 type fakeUpstreamStore struct {

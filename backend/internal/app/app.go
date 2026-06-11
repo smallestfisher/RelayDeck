@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -20,37 +21,37 @@ import (
 func New(cfg config.Config) http.Handler {
 	mux := http.NewServeMux()
 	gatewayStore := store.NewStaticGatewayConfigStore(nil, nil, nil)
-	usersStore := store.NewBootstrapUserStore(cfg.BootstrapOwnerEmail, cfg.BootstrapOwnerPassword, time.Now())
-	adminStore := store.NewAdminStore(usersStore, gatewayStore, nil)
-	upstreamSecretKey := cfg.UpstreamSecretKey
-	if upstreamSecretKey == "" {
-		upstreamSecretKey = "0123456789abcdef0123456789abcdef"
+	if cfg.UpstreamSecretKey == "" {
+		panic(errors.New("APP_UPSTREAM_SECRET_KEY is required"))
 	}
-	upstreamSecrets, err := secretbox.New([]byte(upstreamSecretKey))
+	upstreamSecrets, err := secretbox.New([]byte(cfg.UpstreamSecretKey))
 	if err != nil {
 		panic(fmt.Errorf("create upstream secretbox: %w", err))
 	}
 	accountAdapters := upstream.DefaultAccountAdapterRegistry(nil, cfg.GatewayRequestTimeout)
-	if cfg.DatabaseURL != "" {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		db, err := postgres.Open(ctx, cfg.DatabaseURL)
-		if err != nil {
-			panic(fmt.Errorf("open postgres: %w", err))
-		}
-		users := postgres.NewUserStore(db)
-		if err := users.EnsureSchema(ctx); err != nil {
-			panic(fmt.Errorf("ensure users schema: %w", err))
-		}
-		if err := users.BootstrapOwner(ctx, cfg.BootstrapOwnerEmail, cfg.BootstrapOwnerPassword); err != nil {
-			panic(fmt.Errorf("bootstrap owner: %w", err))
-		}
-		upstreams := postgres.NewUpstreamStore(db)
-		if err := upstreams.EnsureSchema(ctx); err != nil {
-			panic(fmt.Errorf("ensure upstream schema: %w", err))
-		}
-		adminStore = store.NewAdminStore(users, gatewayStore, upstreams)
+
+	if cfg.DatabaseURL == "" {
+		panic(errors.New("DATABASE_URL is required"))
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	db, err := postgres.Open(ctx, cfg.DatabaseURL)
+	if err != nil {
+		panic(fmt.Errorf("open postgres: %w", err))
+	}
+	users := postgres.NewUserStore(db)
+	if err := users.EnsureSchema(ctx); err != nil {
+		panic(fmt.Errorf("ensure users schema: %w", err))
+	}
+	if err := users.BootstrapOwner(ctx, cfg.BootstrapOwnerEmail, cfg.BootstrapOwnerPassword); err != nil {
+		panic(fmt.Errorf("bootstrap owner: %w", err))
+	}
+	upstreams := postgres.NewUpstreamStore(db)
+	if err := upstreams.EnsureSchema(ctx); err != nil {
+		panic(fmt.Errorf("ensure upstream schema: %w", err))
+	}
+	adminStore := store.NewAdminStore(users, gatewayStore, upstreams)
+
 	var sessions auth.SessionStore = auth.NewMemorySessionStore(time.Now)
 	if cfg.RedisURL != "" {
 		redisSessions, err := auth.NewRedisSessionStore(cfg.RedisURL, time.Now)

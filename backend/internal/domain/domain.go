@@ -162,11 +162,13 @@ const (
 type UpstreamCredentialKind string
 
 const (
-	CredentialKindNone         UpstreamCredentialKind = "none"
-	CredentialKindCookie       UpstreamCredentialKind = "cookie"
-	CredentialKindAccessToken  UpstreamCredentialKind = "access_token"
-	CredentialKindRefreshToken UpstreamCredentialKind = "refresh_token"
-	CredentialKindJSON         UpstreamCredentialKind = "json"
+	CredentialKindNone                UpstreamCredentialKind = "none"
+	CredentialKindCookie              UpstreamCredentialKind = "cookie"
+	CredentialKindAccessToken         UpstreamCredentialKind = "access_token"
+	CredentialKindRefreshToken        UpstreamCredentialKind = "refresh_token"
+	CredentialKindJSON                UpstreamCredentialKind = "json"
+	CredentialKindNewAPIAccessToken   UpstreamCredentialKind = "new_api_access_token"
+	CredentialKindSub2APIRefreshToken UpstreamCredentialKind = "sub2api_refresh_token"
 )
 
 type UpstreamAPIStatus string
@@ -307,13 +309,29 @@ type ModelSyncResult struct {
 	Models        []UpstreamSyncedModel
 }
 
+type UpstreamCredentialUpdate struct {
+	Kind      UpstreamCredentialKind
+	Plaintext string
+}
+
+type AccountCredentialTestResult struct {
+	Status           UpstreamAccountStatus
+	CredentialUpdate *UpstreamCredentialUpdate
+}
+
 type QuotaRefreshResult struct {
-	Status        UpstreamAccountStatus
-	BalanceAmount float64
-	BalanceUnit   string
+	Status           UpstreamAccountStatus
+	BalanceAmount    float64
+	BalanceUnit      string
+	CredentialUpdate *UpstreamCredentialUpdate
 }
 
 type CheckinResult struct {
-	Status  UpstreamCheckinStatus
-	Message string
+	Status               UpstreamCheckinStatus
+	Message              string
+	AccountStatus        AccountCredentialStatus
+	LastErrorClass       UpstreamErrorClass
+	LastErrorMessage     string
+	ActionRequiredReason string
+	CredentialUpdate     *UpstreamCredentialUpdate
 }

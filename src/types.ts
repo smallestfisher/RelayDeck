@@ -22,7 +22,7 @@ export type PageId =
 
 export type SiteStatus = 'normal' | 'warning' | 'failed' | 'maintenance' | 'offline';
 export type UpstreamPlatformKind = 'new_api' | 'sub2api';
-export type UpstreamCredentialKind = 'none' | 'cookie' | 'access_token' | 'refresh_token' | 'json';
+export type UpstreamCredentialKind = 'none' | 'cookie' | 'access_token' | 'refresh_token' | 'json' | 'new_api_access_token' | 'sub2api_refresh_token';
 export type UpstreamAPIStatus = 'unknown' | 'healthy' | 'warning' | 'failed' | 'disabled';
 export type AccountCredentialStatus = 'not_configured' | 'valid' | 'expired' | 'failed' | 'action_required';
 export type UpstreamCheckinStatus = 'unsupported' | 'not_configured' | 'checked' | 'unchecked' | 'failed' | 'action_required';
@@ -112,6 +112,13 @@ export interface UpstreamAccount {
   updatedAt: string;
 }
 
+export interface UpstreamAccountPage {
+  items: UpstreamAccount[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
 export interface UpstreamAccountInput {
   name: string;
   code: string;
@@ -159,6 +166,7 @@ export interface UpstreamActionResult {
   id: string;
   status: 'success' | 'failed' | 'not_found';
   message?: string;
+  accountStatus?: UpstreamAccountStatusSnapshot;
 }
 
 export interface ModelInfo {

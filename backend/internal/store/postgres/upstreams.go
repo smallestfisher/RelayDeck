@@ -41,6 +41,39 @@ func (s *UpstreamStore) ListUpstreamAccounts() []domain.UpstreamAccount {
 	return accounts
 }
 
+func (s *UpstreamStore) ListUpstreamAccountsPage(limit int, offset int) ([]domain.UpstreamAccount, int) {
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	var total int
+	if err := s.db.QueryRowContext(context.Background(), `SELECT count(*) FROM upstream_accounts`).Scan(&total); err != nil {
+		return nil, 0
+	}
+
+	rows, err := s.db.QueryContext(context.Background(), upstreamAccountSelectSQL+` ORDER BY priority DESC, created_at DESC LIMIT $1 OFFSET $2`, limit, offset)
+	if err != nil {
+		return nil, total
+	}
+	defer rows.Close()
+
+	accounts := []domain.UpstreamAccount{}
+	for rows.Next() {
+		account, err := scanUpstreamAccount(rows)
+		if err != nil {
+			return nil, total
+		}
+		accounts = append(accounts, account)
+	}
+	return accounts, total
+}
+
 func (s *UpstreamStore) UpstreamAccount(id string) (domain.UpstreamAccount, bool) {
 	account, err := scanUpstreamAccount(s.db.QueryRowContext(context.Background(), upstreamAccountSelectSQL+` WHERE id = $1::uuid`, id))
 	return account, err == nil

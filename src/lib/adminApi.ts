@@ -3,6 +3,7 @@ import type {
   UpstreamAccount,
   UpstreamAccountEvent,
   UpstreamAccountInput,
+  UpstreamAccountPage,
   UpstreamAccountStatusSnapshot,
   UpstreamActionName,
   UpstreamActionResult,
@@ -39,9 +40,18 @@ async function requestJSON<T>(path: string, init: RequestInit = {}): Promise<T> 
 }
 
 export const adminApi = {
-  async listUpstreamAccounts(): Promise<UpstreamAccount[]> {
-    const payload = await requestJSON<{ items: RawUpstreamAccount[] }>('/api/admin/upstreams/accounts');
-    return payload.items.map(mapUpstreamAccount);
+  async listUpstreamAccounts(params: { limit?: number; offset?: number } = {}): Promise<UpstreamAccountPage> {
+    const query = new URLSearchParams();
+    if (params.limit) query.set('limit', String(params.limit));
+    if (params.offset) query.set('offset', String(params.offset));
+    const path = `/api/admin/upstreams/accounts${query.size > 0 ? `?${query.toString()}` : ''}`;
+    const payload = await requestJSON<{ items: RawUpstreamAccount[]; total?: number; limit?: number; offset?: number }>(path);
+    return {
+      items: payload.items.map(mapUpstreamAccount),
+      total: payload.total ?? payload.items.length,
+      limit: payload.limit ?? params.limit ?? payload.items.length,
+      offset: payload.offset ?? params.offset ?? 0,
+    };
   },
 
   async createUpstreamAccount(input: UpstreamAccountInput): Promise<UpstreamAccount> {
@@ -65,15 +75,27 @@ export const adminApi = {
   },
 
   async runUpstreamAction(id: string, action: UpstreamActionName): Promise<UpstreamActionResult> {
-    return requestJSON<UpstreamActionResult>(`/api/admin/upstreams/accounts/${id}/${action}`, { method: 'POST' });
+    const payload = await requestJSON<RawUpstreamActionResult>(`/api/admin/upstreams/accounts/${id}/${action}`, { method: 'POST' });
+    return mapUpstreamActionResult(payload);
+  },
+
+  async testUpstreamDraft(input: UpstreamAccountInput): Promise<UpstreamActionResult> {
+    return requestJSON<UpstreamActionResult>('/api/admin/upstreams/test', {
+      method: 'POST',
+      body: JSON.stringify({
+        platform_kind: input.platformKind,
+        base_url: input.baseUrl,
+        api_key: input.apiKey,
+      }),
+    });
   },
 
   async runBatchUpstreamAction(ids: string[], action: UpstreamBatchActionName): Promise<UpstreamActionResult[]> {
-    const payload = await requestJSON<{ results: UpstreamActionResult[] }>(`/api/admin/upstreams/accounts/batch/${action}`, {
+    const payload = await requestJSON<{ results: RawUpstreamActionResult[] }>(`/api/admin/upstreams/accounts/batch/${action}`, {
       method: 'POST',
       body: JSON.stringify({ ids }),
     });
-    return payload.results;
+    return payload.results.map(mapUpstreamActionResult);
   },
 
   async listUpstreamModels(id: string): Promise<UpstreamModel[]> {
@@ -190,6 +212,13 @@ interface RawUpstreamAccountEvent {
   created_at?: string;
 }
 
+interface RawUpstreamActionResult {
+  id: string;
+  status: 'success' | 'failed' | 'not_found';
+  message?: string;
+  account_status?: RawUpstreamStatus;
+}
+
 function toRawUpstreamAccountInput(input: UpstreamAccountInput) {
   return {
     name: input.name,
@@ -206,6 +235,15 @@ function toRawUpstreamAccountInput(input: UpstreamAccountInput) {
     auto_refresh_quota: input.autoRefreshQuota,
     auto_checkin: input.autoCheckin,
     note: input.note,
+  };
+}
+
+function mapUpstreamActionResult(raw: RawUpstreamActionResult): UpstreamActionResult {
+  return {
+    id: raw.id,
+    status: raw.status,
+    message: raw.message,
+    accountStatus: raw.account_status ? mapUpstreamStatus(raw.account_status) : undefined,
   };
 }
 

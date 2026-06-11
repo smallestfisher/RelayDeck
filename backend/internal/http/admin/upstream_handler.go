@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/smallestfisher/relaydeck/backend/internal/domain"
@@ -56,14 +57,16 @@ type batchRequest struct {
 }
 
 type actionResult struct {
-	ID      string `json:"id"`
-	Status  string `json:"status"`
-	Message string `json:"message,omitempty"`
+	ID            string                        `json:"id"`
+	Status        string                        `json:"status"`
+	Message       string                        `json:"message,omitempty"`
+	AccountStatus *domain.UpstreamAccountStatus `json:"account_status,omitempty"`
 }
 
 func (h *Handler) mountUpstreamRoutes(mux *http.ServeMux) {
 	mux.Handle("GET /api/admin/upstreams/accounts", h.requireAdmin(http.HandlerFunc(h.handleUpstreamAccounts)))
 	mux.Handle("POST /api/admin/upstreams/accounts", h.requireAdmin(http.HandlerFunc(h.handleCreateUpstreamAccount)))
+	mux.Handle("POST /api/admin/upstreams/test", h.requireAdmin(http.HandlerFunc(h.handleDraftUpstreamAPITest)))
 	mux.Handle("GET /api/admin/upstreams/accounts/{id}", h.requireAdmin(http.HandlerFunc(h.handleUpstreamAccountByID)))
 	mux.Handle("PUT /api/admin/upstreams/accounts/{id}", h.requireAdmin(http.HandlerFunc(h.handleUpdateUpstreamAccount)))
 	mux.Handle("DELETE /api/admin/upstreams/accounts/{id}", h.requireAdmin(http.HandlerFunc(h.handleDeleteUpstreamAccount)))
@@ -93,18 +96,24 @@ func (h *Handler) upstreamStore(w http.ResponseWriter) (store.UpstreamAccountSto
 	return upstreams, true
 }
 
-func (h *Handler) handleUpstreamAccounts(w http.ResponseWriter, _ *http.Request) {
+func (h *Handler) handleUpstreamAccounts(w http.ResponseWriter, r *http.Request) {
 	upstreams, ok := h.upstreamStore(w)
 	if !ok {
 		return
 	}
-	accounts := upstreams.ListUpstreamAccounts()
+	pagination := parseUpstreamAccountPagination(r)
+	accounts, total := listUpstreamAccounts(upstreams, pagination.Limit, pagination.Offset)
 	items := make([]upstreamAccountResponse, 0, len(accounts))
 	for _, account := range accounts {
 		status, _ := upstreams.UpstreamAccountStatus(account.ID)
 		items = append(items, toUpstreamAccountResponse(account, status))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items":  items,
+		"total":  total,
+		"limit":  pagination.Limit,
+		"offset": pagination.Offset,
+	})
 }
 
 func (h *Handler) handleCreateUpstreamAccount(w http.ResponseWriter, r *http.Request) {
@@ -195,6 +204,38 @@ func (h *Handler) handleDeleteUpstreamAccount(w http.ResponseWriter, r *http.Req
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (h *Handler) handleDraftUpstreamAPITest(w http.ResponseWriter, r *http.Request) {
+	var payload upstreamAccountRequest
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_json"})
+		return
+	}
+	if err := validateDraftUpstreamAPITestRequest(payload); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+		return
+	}
+	adapter, ok := h.upstreams.For(payload.PlatformKind)
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "platform_kind_unsupported"})
+		return
+	}
+	account := domain.UpstreamAccount{
+		ID:           "draft",
+		PlatformKind: payload.PlatformKind,
+		BaseURL:      strings.TrimRight(strings.TrimSpace(payload.BaseURL), "/"),
+		Enabled:      true,
+	}
+	status, err := adapter.TestAPI(r.Context(), account, strings.TrimSpace(payload.APIKey))
+	result := actionResult{ID: "draft", Status: "success"}
+	if err != nil {
+		result.Status = "failed"
+		result.Message = err.Error()
+	} else if status.LastErrorMessage != "" {
+		result.Message = status.LastErrorMessage
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
 func (h *Handler) handleUpstreamModels(w http.ResponseWriter, r *http.Request) {
 	upstreams, ok := h.upstreamStore(w)
 	if !ok {
@@ -256,24 +297,80 @@ func (h *Handler) runUpstreamAction(ctx context.Context, id string, action strin
 		status, err := adapter.TestAPI(ctx, account, apiKey)
 		return h.storeActionStatus(upstreams, account, action, status, nil, err)
 	case "test-account":
-		status, err := adapter.TestAccountCredential(ctx, account, accountCredential)
-		return h.storeActionStatus(upstreams, account, action, status, nil, err)
+		result, err := adapter.TestAccountCredential(ctx, account, accountCredential)
+		if err == nil {
+			if updated, updateErr := h.applyCredentialUpdate(upstreams, account, result.CredentialUpdate); updateErr != nil {
+				return actionResult{ID: id, Status: "failed", Message: updateErr.Error()}
+			} else {
+				account = updated
+			}
+		}
+		return h.storeActionStatus(upstreams, account, action, result.Status, nil, err)
 	case "sync-models":
 		result, status, err := adapter.SyncModels(ctx, account, apiKey)
 		return h.storeActionStatus(upstreams, account, action, status, result.Models, err)
 	case "refresh-quota":
 		result, err := adapter.RefreshQuota(ctx, account, apiKey, accountCredential)
+		if err == nil {
+			if updated, updateErr := h.applyCredentialUpdate(upstreams, account, result.CredentialUpdate); updateErr != nil {
+				return actionResult{ID: id, Status: "failed", Message: updateErr.Error()}
+			} else {
+				account = updated
+			}
+		}
 		return h.storeActionStatus(upstreams, account, action, result.Status, nil, err)
 	case "checkin":
 		result, err := adapter.Checkin(ctx, account, accountCredential)
+		if err == nil {
+			if updated, updateErr := h.applyCredentialUpdate(upstreams, account, result.CredentialUpdate); updateErr != nil {
+				return actionResult{ID: id, Status: "failed", Message: updateErr.Error()}
+			} else {
+				account = updated
+			}
+		}
 		status := domain.UpstreamAccountStatus{UpstreamAccountID: account.ID, CheckinStatus: result.Status, UpdatedAt: h.now()}
-		return h.storeActionStatus(upstreams, account, action, status, nil, err)
+		if result.Status == domain.CheckinStatusChecked {
+			status.LastCheckinAt = h.now()
+			if account.HasAccountCredential() {
+				status.AccountStatus = domain.AccountCredentialStatusValid
+			}
+		}
+		if result.AccountStatus != "" {
+			status.AccountStatus = result.AccountStatus
+		}
+		status.LastErrorClass = result.LastErrorClass
+		status.LastErrorMessage = firstNonEmpty(result.LastErrorMessage, result.Message)
+		status.ActionRequiredReason = result.ActionRequiredReason
+		actionResult := h.storeActionStatus(upstreams, account, action, status, nil, err)
+		if actionResult.Message == "" {
+			actionResult.Message = result.Message
+		}
+		return actionResult
 	default:
 		return actionResult{ID: id, Status: "failed", Message: "unknown action"}
 	}
 }
 
+func (h *Handler) applyCredentialUpdate(upstreams store.UpstreamAccountStore, account domain.UpstreamAccount, update *domain.UpstreamCredentialUpdate) (domain.UpstreamAccount, error) {
+	if update == nil {
+		return account, nil
+	}
+	if update.Kind == "" || strings.TrimSpace(update.Plaintext) == "" {
+		return domain.UpstreamAccount{}, errors.New("credential update is invalid")
+	}
+	encrypted, err := h.encryptSecret(update.Plaintext)
+	if err != nil {
+		return domain.UpstreamAccount{}, err
+	}
+	account.AccountCredentialKind = update.Kind
+	account.AccountCredentialEncrypted = encrypted
+	return upstreams.UpdateUpstreamAccount(account)
+}
+
 func (h *Handler) storeActionStatus(upstreams store.UpstreamAccountStore, account domain.UpstreamAccount, action string, status domain.UpstreamAccountStatus, models []domain.UpstreamSyncedModel, err error) actionResult {
+	if existing, ok := upstreams.UpstreamAccountStatus(account.ID); ok {
+		status = mergeActionStatus(action, existing, status)
+	}
 	status.UpstreamAccountID = account.ID
 	if status.UpdatedAt.IsZero() {
 		status.UpdatedAt = h.now()
@@ -296,7 +393,38 @@ func (h *Handler) storeActionStatus(upstreams store.UpstreamAccountStore, accoun
 		Message:           firstNonEmpty(message, status.LastErrorMessage),
 		LatencyMS:         status.LatencyMS,
 	})
-	return actionResult{ID: account.ID, Status: eventStatus, Message: message}
+	snapshot := status
+	return actionResult{ID: account.ID, Status: eventStatus, Message: message, AccountStatus: &snapshot}
+}
+
+func mergeActionStatus(action string, existing domain.UpstreamAccountStatus, status domain.UpstreamAccountStatus) domain.UpstreamAccountStatus {
+	if status.APIStatus == "" || action == "test-account" || action == "checkin" {
+		status.APIStatus = existing.APIStatus
+		status.LastAPICheckedAt = existing.LastAPICheckedAt
+	}
+	if status.AccountStatus == "" || action == "test-api" || action == "sync-models" {
+		status.AccountStatus = existing.AccountStatus
+		status.LastAccountCheckedAt = existing.LastAccountCheckedAt
+	}
+	if status.CheckinStatus == "" || action == "test-api" || action == "sync-models" || action == "refresh-quota" {
+		status.CheckinStatus = existing.CheckinStatus
+		status.LastCheckinAt = existing.LastCheckinAt
+	}
+	if action != "test-api" && action != "sync-models" {
+		status.ModelCount = existing.ModelCount
+		status.LastModelSyncedAt = existing.LastModelSyncedAt
+	}
+	if status.LatencyMS == 0 {
+		status.LatencyMS = existing.LatencyMS
+	}
+	if action != "refresh-quota" {
+		status.BalanceAmount = existing.BalanceAmount
+		status.BalanceUnit = existing.BalanceUnit
+	}
+	if status.UpdatedAt.IsZero() {
+		status.UpdatedAt = existing.UpdatedAt
+	}
+	return status
 }
 
 func (h *Handler) accountFromRequest(payload upstreamAccountRequest, existing domain.UpstreamAccount, create bool) (domain.UpstreamAccount, error) {
@@ -383,6 +511,68 @@ func validateUpstreamAccountRequest(payload upstreamAccountRequest, create bool)
 		return errors.New("api_key_required")
 	}
 	return nil
+}
+
+func validateDraftUpstreamAPITestRequest(payload upstreamAccountRequest) error {
+	if payload.PlatformKind != domain.PlatformKindNewAPI && payload.PlatformKind != domain.PlatformKindSub2API {
+		return errors.New("platform_kind_invalid")
+	}
+	if strings.TrimSpace(payload.BaseURL) == "" {
+		return errors.New("base_url_required")
+	}
+	if strings.TrimSpace(payload.APIKey) == "" {
+		return errors.New("api_key_required")
+	}
+	return nil
+}
+
+type upstreamAccountPagination struct {
+	Limit  int
+	Offset int
+}
+
+type upstreamAccountPager interface {
+	ListUpstreamAccountsPage(limit int, offset int) ([]domain.UpstreamAccount, int)
+}
+
+const (
+	defaultUpstreamAccountLimit = 50
+	maxUpstreamAccountLimit     = 200
+)
+
+func parseUpstreamAccountPagination(r *http.Request) upstreamAccountPagination {
+	limit := defaultUpstreamAccountLimit
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
+			limit = parsed
+		}
+	}
+	if limit > maxUpstreamAccountLimit {
+		limit = maxUpstreamAccountLimit
+	}
+	offset := 0
+	if raw := r.URL.Query().Get("offset"); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
+			offset = parsed
+		}
+	}
+	return upstreamAccountPagination{Limit: limit, Offset: offset}
+}
+
+func listUpstreamAccounts(upstreams store.UpstreamAccountStore, limit int, offset int) ([]domain.UpstreamAccount, int) {
+	if pager, ok := upstreams.(upstreamAccountPager); ok {
+		return pager.ListUpstreamAccountsPage(limit, offset)
+	}
+	accounts := upstreams.ListUpstreamAccounts()
+	total := len(accounts)
+	if offset >= total {
+		return []domain.UpstreamAccount{}, total
+	}
+	end := offset + limit
+	if end > total {
+		end = total
+	}
+	return accounts[offset:end], total
 }
 
 func toUpstreamAccountResponse(account domain.UpstreamAccount, status domain.UpstreamAccountStatus) upstreamAccountResponse {

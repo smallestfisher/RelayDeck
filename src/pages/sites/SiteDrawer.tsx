@@ -29,16 +29,23 @@ interface SiteDrawerProps {
   saving: boolean;
   testing: boolean;
   error?: string;
+  notice?: string;
   onClose: () => void;
   onSave: (input: UpstreamAccountInput) => void;
   onTestAPI: (input: UpstreamAccountInput) => void;
 }
 
-export function SiteDrawer({ open, account, saving, testing, error, onClose, onSave, onTestAPI }: SiteDrawerProps) {
+export function SiteDrawer({ open, account, saving, testing, error, notice, onClose, onSave, onTestAPI }: SiteDrawerProps) {
   const [form, setForm] = useState<UpstreamAccountInput>(emptyForm);
+  const [newAPIAccessToken, setNewAPIAccessToken] = useState('');
+  const [newAPIUserID, setNewAPIUserID] = useState('');
+  const [sub2APIRefreshToken, setSub2APIRefreshToken] = useState('');
 
   useEffect(() => {
     if (!open) return;
+    setNewAPIAccessToken('');
+    setNewAPIUserID('');
+    setSub2APIRefreshToken('');
     if (!account) {
       setForm(emptyForm);
       return;
@@ -71,6 +78,32 @@ export function SiteDrawer({ open, account, saving, testing, error, onClose, onS
     setForm((current) => ({ ...current, [key]: value }));
   }
 
+  function changeCredentialKind(kind: UpstreamCredentialKind) {
+    setNewAPIAccessToken('');
+    setNewAPIUserID('');
+    setSub2APIRefreshToken('');
+    setForm((current) => ({ ...current, accountCredentialKind: kind, accountCredential: '' }));
+  }
+
+  function buildCredentialPayload(input: UpstreamAccountInput): UpstreamAccountInput {
+    if (input.accountCredentialKind === 'new_api_access_token') {
+      const accessToken = newAPIAccessToken.trim();
+      const userID = newAPIUserID.trim();
+      return {
+        ...input,
+        accountCredential: accessToken || userID ? JSON.stringify({ access_token: accessToken, user_id: userID }) : '',
+      };
+    }
+    if (input.accountCredentialKind === 'sub2api_refresh_token') {
+      const refreshToken = sub2APIRefreshToken.trim();
+      return {
+        ...input,
+        accountCredential: refreshToken ? JSON.stringify({ refresh_token: refreshToken }) : '',
+      };
+    }
+    return input;
+  }
+
   return (
     <Drawer
       open={open}
@@ -80,10 +113,10 @@ export function SiteDrawer({ open, account, saving, testing, error, onClose, onS
       footer={
         <div className="flex justify-end gap-3">
           <Button onClick={onClose}>取消</Button>
-          <Button variant="secondary" icon={<TestTube2 className="h-4 w-4" />} disabled={testing} onClick={() => onTestAPI(form)}>
+          <Button variant="secondary" icon={<TestTube2 className="h-4 w-4" />} disabled={testing} onClick={() => onTestAPI(buildCredentialPayload(form))}>
             {testing ? '测试中' : '测试 API'}
           </Button>
-          <Button variant="primary" icon={<Save className="h-4 w-4" />} disabled={saving} onClick={() => onSave(form)}>
+          <Button variant="primary" icon={<Save className="h-4 w-4" />} disabled={saving} onClick={() => onSave(buildCredentialPayload(form))}>
             {saving ? '保存中' : '保存'}
           </Button>
         </div>
@@ -91,6 +124,7 @@ export function SiteDrawer({ open, account, saving, testing, error, onClose, onS
     >
       <div className="space-y-5">
         {error && <div className="rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">{error}</div>}
+        {notice && <div className="rounded-lg border border-success/30 bg-success/10 px-3 py-2 text-sm text-success">{notice}</div>}
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Field label="站点名称 *">
@@ -124,9 +158,33 @@ export function SiteDrawer({ open, account, saving, testing, error, onClose, onS
             <SelectControl
               options={credentialKindOptions}
               value={form.accountCredentialKind}
-              onChange={(event) => patch('accountCredentialKind', event.target.value as UpstreamCredentialKind)}
+              onChange={(event) => changeCredentialKind(event.target.value as UpstreamCredentialKind)}
             />
-            {form.accountCredentialKind !== 'none' && (
+            {form.accountCredentialKind === 'new_api_access_token' && (
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <input
+                  value={newAPIAccessToken}
+                  onChange={(event) => setNewAPIAccessToken(event.target.value)}
+                  className={inputClass}
+                  placeholder={isEditing ? 'Access Token（留空不修改）' : 'Access Token'}
+                />
+                <input
+                  value={newAPIUserID}
+                  onChange={(event) => setNewAPIUserID(event.target.value)}
+                  className={inputClass}
+                  placeholder={isEditing ? 'User ID（留空不修改）' : 'User ID'}
+                />
+              </div>
+            )}
+            {form.accountCredentialKind === 'sub2api_refresh_token' && (
+              <input
+                value={sub2APIRefreshToken}
+                onChange={(event) => setSub2APIRefreshToken(event.target.value)}
+                className={inputClass}
+                placeholder={isEditing ? 'rt_...（留空不修改）' : 'rt_...'}
+              />
+            )}
+            {form.accountCredentialKind !== 'none' && form.accountCredentialKind !== 'new_api_access_token' && form.accountCredentialKind !== 'sub2api_refresh_token' && (
               <textarea
                 value={form.accountCredential ?? ''}
                 onChange={(event) => patch('accountCredential', event.target.value)}
