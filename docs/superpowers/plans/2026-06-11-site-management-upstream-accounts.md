@@ -41,6 +41,11 @@
 
 - `git commit -m "Add upstream account domain and secret handling"`
 
+**Status**
+
+- Completed and committed: `be79eaf Add upstream account domain and secret handling`
+- Verified with: `cd backend && GOCACHE=/tmp/go-build go test ./internal/domain ./internal/secretbox ./internal/config -v`
+
 ---
 
 ## Task 2: Storage And Schema
@@ -76,6 +81,15 @@
 
 - `git commit -m "Persist upstream account records"`
 
+**Status**
+
+- Completed and committed: `cc7086d Persist upstream account records`
+- Legacy `MemoryStore` was removed instead of extended.
+- Verified with:
+  - `cd backend && GOCACHE=/tmp/go-build go test ./internal/store -v`
+  - `cd backend && DATABASE_URL=postgres://postgres:postgres@localhost:5432/relaydeck_test?sslmode=disable GOCACHE=/tmp/go-build go test ./internal/store/postgres -run TestUpstream -v`
+  - `cd backend && GOCACHE=/tmp/go-build go test ./internal/http/admin ./internal/http/gateway ./internal/app -v`
+
 ---
 
 ## Task 3: Platform Adapters
@@ -108,6 +122,11 @@
 **Commit**
 
 - `git commit -m "Add upstream account platform adapters"`
+
+**Status**
+
+- Completed and committed: `50fc19b Add upstream account platform adapters`
+- Verified with: `cd backend && GOCACHE=/tmp/go-build go test ./internal/upstream -v`
 
 ---
 
@@ -165,6 +184,13 @@
 
 - `git commit -m "Add upstream account admin APIs"`
 
+**Status**
+
+- Completed and committed: `efd43f1 Add upstream account admin APIs`
+- Verified with:
+  - `cd backend && GOCACHE=/tmp/go-build go test ./internal/http/admin ./internal/app -v`
+  - `cd backend && GOCACHE=/tmp/go-build go test ./...`
+
 ---
 
 ## Task 5: Frontend API Client And Types
@@ -194,6 +220,11 @@
 **Commit**
 
 - `git commit -m "Add upstream account frontend API types"`
+
+**Status**
+
+- Completed and committed: `60041e6 Add upstream account frontend API types`
+- Verified with: `npm run build`
 
 ---
 
@@ -232,6 +263,13 @@
 
 - `git commit -m "Connect site management page to upstream APIs"`
 
+**Status**
+
+- Completed and committed: `a6388f4 Connect site management page to upstream APIs`
+- Verified with:
+  - `cd backend && GOCACHE=/tmp/go-build go test ./internal/domain ./internal/http/admin ./internal/app -v`
+  - `npm run build`
+
 ---
 
 ## Task 7: Full Verification
@@ -258,6 +296,20 @@
 **Commit**
 
 - If final verification required fixes, commit them with `git commit -m "Finalize site management upstream accounts"`.
+
+**Status**
+
+- In progress.
+- Completed:
+  - `cd backend && GOCACHE=/tmp/go-build go test ./...`
+  - `npm run build`
+  - `git status --short` before this status update was clean.
+- Pending:
+  - Start backend and frontend dev servers.
+  - Browser-check login and navigation to `站点管理`.
+  - Browser-check no 2FA/TOTP controls are present.
+  - Browser-check missing account credentials show as `未配置`, unsupported check-in shows as `不支持`, and human verification states show as `需人工处理`.
+- Remote push remains intentionally deferred until final feature verification and user confirmation.
 
 **Remote Push**
 
