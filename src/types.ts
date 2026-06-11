@@ -21,6 +21,13 @@ export type PageId =
   | 'settings';
 
 export type SiteStatus = 'normal' | 'warning' | 'failed' | 'maintenance' | 'offline';
+export type UpstreamPlatformKind = 'new_api' | 'sub2api';
+export type UpstreamCredentialKind = 'none' | 'cookie' | 'access_token' | 'refresh_token' | 'json';
+export type UpstreamAPIStatus = 'unknown' | 'healthy' | 'warning' | 'failed' | 'disabled';
+export type AccountCredentialStatus = 'not_configured' | 'valid' | 'expired' | 'failed' | 'action_required';
+export type UpstreamCheckinStatus = 'unsupported' | 'not_configured' | 'checked' | 'unchecked' | 'failed' | 'action_required';
+export type UpstreamActionName = 'test-api' | 'test-account' | 'sync-models' | 'refresh-quota' | 'checkin';
+export type UpstreamBatchActionName = 'test-api' | 'sync-models' | 'refresh-quota' | 'checkin';
 export type ModelStatus = 'normal' | 'partial' | 'unavailable';
 export type CheckinStatus = 'checked' | 'unchecked' | 'disabled';
 export type TestStatus = 'success' | 'partial' | 'failed';
@@ -62,6 +69,96 @@ export interface Site {
   healthScore: number;
   lastChecked: string;
   note: string;
+}
+
+export interface UpstreamAccountStatusSnapshot {
+  upstreamAccountId: string;
+  apiStatus: UpstreamAPIStatus;
+  accountStatus: AccountCredentialStatus;
+  checkinStatus: UpstreamCheckinStatus;
+  modelCount: number;
+  latencyMs: number;
+  balanceAmount: number;
+  balanceUnit: string;
+  lastApiCheckedAt?: string;
+  lastAccountCheckedAt?: string;
+  lastModelSyncedAt?: string;
+  lastCheckinAt?: string;
+  lastErrorClass?: string;
+  lastErrorMessage?: string;
+  actionRequiredReason?: string;
+  updatedAt?: string;
+}
+
+export interface UpstreamAccount {
+  id: string;
+  name: string;
+  code: string;
+  platformKind: UpstreamPlatformKind;
+  baseUrl: string;
+  enabled: boolean;
+  includeInRouting: boolean;
+  priority: number;
+  apiKeyPrefix: string;
+  hasApiCredential: boolean;
+  accountCredentialKind: UpstreamCredentialKind;
+  hasAccountCredential: boolean;
+  autoSyncModels: boolean;
+  autoRefreshQuota: boolean;
+  autoCheckin: boolean;
+  note: string;
+  status: UpstreamAccountStatusSnapshot;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UpstreamAccountInput {
+  name: string;
+  code: string;
+  platformKind: UpstreamPlatformKind;
+  baseUrl: string;
+  enabled: boolean;
+  includeInRouting: boolean;
+  priority: number;
+  apiKey?: string;
+  accountCredentialKind: UpstreamCredentialKind;
+  accountCredential?: string;
+  autoSyncModels: boolean;
+  autoRefreshQuota: boolean;
+  autoCheckin: boolean;
+  note: string;
+}
+
+export interface UpstreamModel {
+  id: string;
+  upstreamAccountId: string;
+  normalizedModelName: string;
+  upstreamModelName: string;
+  displayName: string;
+  nativeWireProtocol: string;
+  supportedWireProtocols: string[];
+  capabilities: Capability[];
+  status: string;
+  rawMetadata?: Record<string, unknown>;
+  lastSyncedAt: string;
+}
+
+export interface UpstreamAccountEvent {
+  id: string;
+  upstreamAccountId: string;
+  operation: string;
+  status: string;
+  errorClass?: string;
+  message: string;
+  latencyMs: number;
+  metadata?: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface UpstreamActionResult {
+  id: string;
+  status: 'success' | 'failed' | 'not_found';
+  message?: string;
 }
 
 export interface ModelInfo {

@@ -26,10 +26,16 @@ export function formatLatency(value?: number): string {
 export function statusText(status: string): string {
   const map: Record<string, string> = {
     normal: '正常',
+    healthy: '健康',
     warning: '部分异常',
     failed: '连接失败',
     maintenance: '维护中',
     offline: '离线',
+    unknown: '未知',
+    valid: '有效',
+    not_configured: '未配置',
+    action_required: '需人工处理',
+    unsupported: '不支持',
     partial: '部分可用',
     unavailable: '不可用',
     checked: '已签到',
