@@ -406,10 +406,8 @@ func (h *Handler) runUpstreamAction(ctx context.Context, id string, action strin
 		syncResult, syncStatus, syncErr := adapter.SyncModels(ctx, account, apiKey)
 		if syncErr == nil {
 			models = syncResult.Models
-			finalStatus.APIStatus = syncStatus.APIStatus
 			finalStatus.ModelCount = syncStatus.ModelCount
 			finalStatus.LatencyMS = syncStatus.LatencyMS
-			finalStatus.LastAPICheckedAt = syncStatus.LastAPICheckedAt
 			finalStatus.LastModelSyncedAt = syncStatus.LastModelSyncedAt
 			if syncStatus.LastErrorClass != "" {
 				finalStatus.LastErrorClass = syncStatus.LastErrorClass
@@ -470,9 +468,10 @@ func (h *Handler) storeActionStatus(upstreams store.UpstreamAccountStore, accoun
 }
 
 func mergeActionStatus(action string, existing domain.UpstreamAccountStatus, status domain.UpstreamAccountStatus) domain.UpstreamAccountStatus {
-	if status.APIStatus == "" || action == "test-account" || action == "checkin" {
+	if status.APIStatus == "" || action == "test-account" || action == "checkin" || action == "sync-models" || action == "refresh-all" {
 		status.APIStatus = existing.APIStatus
 		status.LastAPICheckedAt = existing.LastAPICheckedAt
+		status.APILatencyMS = existing.APILatencyMS
 	}
 	if status.AccountStatus == "" || action == "test-api" || action == "sync-models" {
 		status.AccountStatus = existing.AccountStatus
@@ -486,8 +485,11 @@ func mergeActionStatus(action string, existing domain.UpstreamAccountStatus, sta
 		status.ModelCount = existing.ModelCount
 		status.LastModelSyncedAt = existing.LastModelSyncedAt
 	}
-	if status.LatencyMS == 0 {
+	if status.LatencyMS == 0 || action == "test-api" {
 		status.LatencyMS = existing.LatencyMS
+	}
+	if status.APILatencyMS == 0 && action != "test-api" {
+		status.APILatencyMS = existing.APILatencyMS
 	}
 	if action != "refresh-quota" && action != "refresh-all" {
 		status.BalanceAmount = existing.BalanceAmount
@@ -888,7 +890,7 @@ func (h *Handler) handleTestCall(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) statusFromTestCallResult(accountID string, result domain.UpstreamTestCallResult) domain.UpstreamAccountStatus {
-	status := domain.UpstreamAccountStatus{UpstreamAccountID: accountID, LastAPICheckedAt: h.now(), UpdatedAt: h.now(), LatencyMS: result.LatencyMS}
+	status := domain.UpstreamAccountStatus{UpstreamAccountID: accountID, LastAPICheckedAt: h.now(), UpdatedAt: h.now(), APILatencyMS: result.LatencyMS}
 	if result.OK {
 		status.APIStatus = domain.UpstreamAPIStatusHealthy
 		return status

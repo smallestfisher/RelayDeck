@@ -164,6 +164,7 @@ CREATE TABLE upstream_account_status (
   checkin_status TEXT NOT NULL DEFAULT 'unsupported',
   model_count INTEGER NOT NULL DEFAULT 0,
   latency_ms INTEGER NOT NULL DEFAULT 0,
+  api_latency_ms INTEGER NOT NULL DEFAULT 0,
   balance_amount DOUBLE PRECISION NOT NULL DEFAULT 0,
   balance_unit TEXT NOT NULL DEFAULT '',
   last_api_checked_at TIMESTAMPTZ,

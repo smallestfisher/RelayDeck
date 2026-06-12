@@ -440,7 +440,7 @@ export function SitesPage() {
               <div className="font-medium text-text">{inspectAccount.baseUrl}</div>
               <div className="mt-2 grid grid-cols-2 gap-2">
                 <span>API：{inspectAccount.status.apiStatus}</span>
-                <span>延迟：{formatDetailLatency(inspectAccount.status.latencyMs, inspectAccount.status.lastApiCheckedAt)}</span>
+                <span>站点/API：{formatDetailLatencyPair(inspectAccount.status)}</span>
                 <span>模型：{formatDetailModelCount(inspectAccount.status.modelCount, inspectAccount.status.lastModelSyncedAt)}</span>
                 <span>账号：{inspectAccount.status.accountStatus}</span>
               </div>
@@ -476,8 +476,10 @@ function latencyMatches(latencyMs: number, band: LatencyBand): boolean {
   return true;
 }
 
-function formatDetailLatency(latencyMs: number, lastApiCheckedAt?: string): string {
-  return lastApiCheckedAt ? formatLatency(latencyMs) : '-';
+function formatDetailLatencyPair(status: UpstreamAccount['status']): string {
+  const site = status.lastModelSyncedAt ? formatLatency(status.latencyMs).replace(' ', '') : '-';
+  const api = status.lastApiCheckedAt ? formatLatency(status.apiLatencyMs).replace(' ', '') : '-';
+  return `${site}/${api}`;
 }
 
 function formatDetailModelCount(modelCount: number, lastModelSyncedAt?: string): string {

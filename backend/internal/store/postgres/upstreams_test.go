@@ -94,6 +94,7 @@ func runUpstreamStoreBehavior(t *testing.T, upstreams upstreamStoreContract) {
 		CheckinStatus:     domain.CheckinStatusUnsupported,
 		ModelCount:        1,
 		LatencyMS:         88,
+		APILatencyMS:      144,
 	}
 	if err := upstreams.UpsertUpstreamAccountStatus(status); err != nil {
 		t.Fatalf("upsert status: %v", err)
@@ -102,7 +103,7 @@ func runUpstreamStoreBehavior(t *testing.T, upstreams upstreamStoreContract) {
 	if !ok {
 		t.Fatal("expected account status")
 	}
-	if storedStatus.APIStatus != domain.UpstreamAPIStatusHealthy || storedStatus.LatencyMS != 88 {
+	if storedStatus.APIStatus != domain.UpstreamAPIStatusHealthy || storedStatus.LatencyMS != 88 || storedStatus.APILatencyMS != 144 {
 		t.Fatalf("unexpected status: %+v", storedStatus)
 	}
 

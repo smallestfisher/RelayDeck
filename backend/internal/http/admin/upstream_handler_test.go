@@ -256,7 +256,7 @@ func TestTestCallUpdatesAPIStatus(t *testing.T) {
 		t.Fatalf("unexpected test response: %+v", response)
 	}
 	status, ok := fakeStore.UpstreamAccountStatus(account.ID)
-	if !ok || status.APIStatus != domain.UpstreamAPIStatusHealthy || status.LastAPICheckedAt.IsZero() {
+	if !ok || status.APIStatus != domain.UpstreamAPIStatusHealthy || status.APILatencyMS != 42 || status.LatencyMS != 0 || status.LastAPICheckedAt.IsZero() {
 		t.Fatalf("expected healthy API status, got %+v", status)
 	}
 }
@@ -390,8 +390,9 @@ func TestRefreshAllKeepsCredentialStatusSeparateFromQuotaAndUsesAPIResult(t *tes
 	account := createStoredUpstreamAccount(t, fakeStore)
 	if err := fakeStore.UpsertUpstreamAccountStatus(domain.UpstreamAccountStatus{
 		UpstreamAccountID: account.ID,
-		APIStatus:         domain.UpstreamAPIStatusUnknown,
+		APIStatus:         domain.UpstreamAPIStatusHealthy,
 		AccountStatus:     domain.AccountCredentialStatusActionRequired,
+		APILatencyMS:      999,
 		UpdatedAt:         fixedAdminNow(),
 	}); err != nil {
 		t.Fatalf("seed status: %v", err)
@@ -411,8 +412,8 @@ func TestRefreshAllKeepsCredentialStatusSeparateFromQuotaAndUsesAPIResult(t *tes
 	if result.AccountStatus == nil {
 		t.Fatalf("expected status snapshot")
 	}
-	if result.AccountStatus.APIStatus != domain.UpstreamAPIStatusFailed {
-		t.Fatalf("expected API status from API/model test, got %+v", result.AccountStatus)
+	if result.AccountStatus.APIStatus != domain.UpstreamAPIStatusHealthy || result.AccountStatus.APILatencyMS != 999 {
+		t.Fatalf("expected refresh-all to preserve API test status, got %+v", result.AccountStatus)
 	}
 	if result.AccountStatus.AccountStatus != domain.AccountCredentialStatusActionRequired {
 		t.Fatalf("expected quota refresh not to overwrite credential status, got %+v", result.AccountStatus)

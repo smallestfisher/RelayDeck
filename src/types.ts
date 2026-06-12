@@ -78,6 +78,7 @@ export interface UpstreamAccountStatusSnapshot {
   checkinStatus: UpstreamCheckinStatus;
   modelCount: number;
   latencyMs: number;
+  apiLatencyMs: number;
   balanceAmount: number;
   balanceUnit: string;
   lastApiCheckedAt?: string;

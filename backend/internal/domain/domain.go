@@ -256,6 +256,7 @@ type UpstreamAccountStatus struct {
 	CheckinStatus        UpstreamCheckinStatus   `json:"checkin_status"`
 	ModelCount           int                     `json:"model_count"`
 	LatencyMS            int                     `json:"latency_ms"`
+	APILatencyMS         int                     `json:"api_latency_ms"`
 	BalanceAmount        float64                 `json:"balance_amount"`
 	BalanceUnit          string                  `json:"balance_unit"`
 	LastAPICheckedAt     time.Time               `json:"last_api_checked_at"`

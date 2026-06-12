@@ -158,6 +158,8 @@ interface RawUpstreamStatus {
   model_count?: number;
   LatencyMS?: number;
   latency_ms?: number;
+  APILatencyMS?: number;
+  api_latency_ms?: number;
   BalanceAmount?: number;
   balance_amount?: number;
   BalanceUnit?: string;
@@ -317,6 +319,7 @@ function mapUpstreamStatus(raw: RawUpstreamStatus): UpstreamAccountStatusSnapsho
     checkinStatus: (raw.checkin_status ?? raw.CheckinStatus ?? 'unsupported') as UpstreamCheckinStatus,
     modelCount: raw.model_count ?? raw.ModelCount ?? 0,
     latencyMs: raw.latency_ms ?? raw.LatencyMS ?? 0,
+    apiLatencyMs: raw.api_latency_ms ?? raw.APILatencyMS ?? 0,
     balanceAmount: raw.balance_amount ?? raw.BalanceAmount ?? 0,
     balanceUnit: raw.balance_unit ?? raw.BalanceUnit ?? '',
     lastApiCheckedAt: normalizeTimestamp(raw.last_api_checked_at ?? raw.LastAPICheckedAt),

@@ -176,13 +176,13 @@ func (s *UpstreamStore) UpstreamAccountStatus(accountID string) (domain.Upstream
 func (s *UpstreamStore) UpsertUpstreamAccountStatus(status domain.UpstreamAccountStatus) error {
 	_, err := s.db.ExecContext(context.Background(), `
 INSERT INTO upstream_account_status (
-  upstream_account_id, api_status, account_status, checkin_status, model_count, latency_ms,
+  upstream_account_id, api_status, account_status, checkin_status, model_count, latency_ms, api_latency_ms,
   balance_amount, balance_unit, last_api_checked_at, last_account_checked_at, last_model_synced_at,
   last_checkin_at, last_error_class, last_error_message, action_required_reason, updated_at
 ) VALUES (
-  $1::uuid, $2, $3, $4, $5, $6,
-  $7, $8, $9, $10, $11,
-  $12, $13, $14, $15, now()
+  $1::uuid, $2, $3, $4, $5, $6, $7,
+  $8, $9, $10, $11, $12,
+  $13, $14, $15, $16, now()
 )
 ON CONFLICT (upstream_account_id) DO UPDATE
 SET api_status = EXCLUDED.api_status,
@@ -190,6 +190,7 @@ SET api_status = EXCLUDED.api_status,
     checkin_status = EXCLUDED.checkin_status,
     model_count = EXCLUDED.model_count,
     latency_ms = EXCLUDED.latency_ms,
+    api_latency_ms = EXCLUDED.api_latency_ms,
     balance_amount = EXCLUDED.balance_amount,
     balance_unit = EXCLUDED.balance_unit,
     last_api_checked_at = EXCLUDED.last_api_checked_at,
@@ -206,6 +207,7 @@ SET api_status = EXCLUDED.api_status,
 		checkinStatusOrUnsupported(status.CheckinStatus),
 		status.ModelCount,
 		status.LatencyMS,
+		status.APILatencyMS,
 		status.BalanceAmount,
 		status.BalanceUnit,
 		nullableTime(status.LastAPICheckedAt),
@@ -357,7 +359,7 @@ SELECT id::text, name, code, platform_kind, base_url, enabled, include_in_routin
 FROM upstream_accounts`
 
 const upstreamStatusSelectSQL = `
-SELECT upstream_account_id::text, api_status, account_status, checkin_status, model_count, latency_ms,
+SELECT upstream_account_id::text, api_status, account_status, checkin_status, model_count, latency_ms, api_latency_ms,
        balance_amount, balance_unit, last_api_checked_at, last_account_checked_at, last_model_synced_at,
        last_checkin_at, last_error_class, last_error_message, action_required_reason, updated_at
 FROM upstream_account_status`
@@ -414,6 +416,7 @@ func scanUpstreamAccountStatus(row scanner) (domain.UpstreamAccountStatus, error
 		&checkinStatus,
 		&status.ModelCount,
 		&status.LatencyMS,
+		&status.APILatencyMS,
 		&status.BalanceAmount,
 		&status.BalanceUnit,
 		&lastAPI,
@@ -611,6 +614,7 @@ CREATE TABLE IF NOT EXISTS upstream_account_status (
   checkin_status TEXT NOT NULL DEFAULT 'unsupported',
   model_count INTEGER NOT NULL DEFAULT 0,
   latency_ms INTEGER NOT NULL DEFAULT 0,
+  api_latency_ms INTEGER NOT NULL DEFAULT 0,
   balance_amount DOUBLE PRECISION NOT NULL DEFAULT 0,
   balance_unit TEXT NOT NULL DEFAULT '',
   last_api_checked_at TIMESTAMPTZ,
@@ -622,6 +626,9 @@ CREATE TABLE IF NOT EXISTS upstream_account_status (
   action_required_reason TEXT NOT NULL DEFAULT '',
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+ALTER TABLE upstream_account_status
+  ADD COLUMN IF NOT EXISTS api_latency_ms INTEGER NOT NULL DEFAULT 0;
 
 CREATE TABLE IF NOT EXISTS upstream_synced_models (
   id UUID PRIMARY KEY,

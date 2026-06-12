@@ -1,5 +1,6 @@
 import { RotateCcw, Send, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { adminApi } from '../../lib/adminApi';
 import { formatLatency } from '../../lib/format';
 import type { UpstreamAccount, UpstreamModel, UpstreamTestCallResult } from '../../types';
@@ -102,10 +103,10 @@ export function TestCallModal({ account, onClose, onStatusUpdate }: TestCallModa
     }
   }
 
-  return (
+  return createPortal(
     <>
-      <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm" onClick={onClose} />
-      <div className="fixed left-1/2 top-1/2 z-50 w-full max-w-2xl -translate-x-1/2 -translate-y-1/2 rounded-xl border border-line bg-panel shadow-2xl">
+      <div className="fixed inset-0 z-[1000] bg-black/40 backdrop-blur-sm" onClick={onClose} />
+      <div className="fixed left-1/2 top-1/2 z-[1001] w-full max-w-2xl -translate-x-1/2 -translate-y-1/2 rounded-xl border border-line bg-panel shadow-2xl">
         <div className="flex items-start justify-between gap-4 border-b border-line px-6 py-5">
           <div>
             <h2 className="text-lg font-semibold text-text">测试 API 调用</h2>
@@ -196,7 +197,8 @@ export function TestCallModal({ account, onClose, onStatusUpdate }: TestCallModa
 
         <div className="border-t border-line px-6 py-3 text-center text-xs text-muted">测试调用会真实请求上游，计费以平台规则为准</div>
       </div>
-    </>
+    </>,
+    document.body
   );
 }
 
