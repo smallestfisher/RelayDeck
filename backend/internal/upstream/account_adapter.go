@@ -297,25 +297,6 @@ func extractModels(body []byte) []domain.UpstreamSyncedModel {
 	return models
 }
 
-func applyModelPricingProtocols(models []domain.UpstreamSyncedModel, pricing map[string][]domain.Protocol) []domain.UpstreamSyncedModel {
-	if len(pricing) == 0 {
-		return models
-	}
-	for i := range models {
-		protocols := pricing[models[i].UpstreamModelName]
-		if len(protocols) == 0 {
-			protocols = pricing[models[i].NormalizedModelName]
-		}
-		if len(protocols) == 0 {
-			continue
-		}
-		models[i].SupportedWireProtocols = protocols
-		models[i].NativeWireProtocol = protocols[0]
-		models[i].Capabilities = capabilitiesForProtocols(models[i].UpstreamModelName, protocols)
-	}
-	return models
-}
-
 func displayName(item map[string]any, fallback string) string {
 	for _, key := range []string{"display_name", "name"} {
 		if value, ok := item[key].(string); ok && value != "" {
@@ -343,33 +324,6 @@ func supportedProtocolsForModel(model string) []domain.Protocol {
 		return []domain.Protocol{domain.ProtocolOpenAIChat, domain.ProtocolOpenAIResponses}
 	}
 	return []domain.Protocol{native}
-}
-
-func capabilitiesForProtocols(model string, protocols []domain.Protocol) []domain.Capability {
-	seen := map[domain.Capability]bool{}
-	capabilities := []domain.Capability{}
-	add := func(capability domain.Capability) {
-		if !seen[capability] {
-			seen[capability] = true
-			capabilities = append(capabilities, capability)
-		}
-	}
-	for _, protocol := range protocols {
-		switch protocol {
-		case domain.ProtocolOpenAIResponses:
-			add(domain.CapabilityResponses)
-		case domain.ProtocolOpenAIChat, domain.ProtocolAnthropicMessages, domain.ProtocolGeminiGenerate:
-			add(domain.CapabilityChat)
-			add(domain.CapabilityStreaming)
-		}
-	}
-	if strings.Contains(strings.ToLower(model), "vision") || strings.Contains(strings.ToLower(model), "gpt-4o") || strings.Contains(strings.ToLower(model), "gemini") {
-		add(domain.CapabilityVision)
-	}
-	if len(capabilities) == 0 {
-		return capabilitiesForModel(model)
-	}
-	return capabilities
 }
 
 func capabilitiesForModel(model string) []domain.Capability {

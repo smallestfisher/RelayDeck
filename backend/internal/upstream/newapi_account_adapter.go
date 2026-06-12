@@ -50,7 +50,7 @@ func (a *NewAPIAccountAdapter) SyncModels(ctx context.Context, account domain.Up
 		status := failedAPIStatus(account.ID, resp.statusCode, resp.body)
 		return domain.ModelSyncResult{AccountID: account.ID}, status, nil
 	}
-	models := applyModelPricingProtocols(extractModels(resp.body), a.modelPricingProtocols(ctx, account))
+	models := extractModels(resp.body)
 	status := healthyAPIStatus(account.ID, len(models), latencyMS(start))
 	status.LastAPICheckedAt = time.Now()
 	status.LastModelSyncedAt = time.Now()
@@ -60,63 +60,6 @@ func (a *NewAPIAccountAdapter) SyncModels(ctx context.Context, account domain.Up
 		UpdatedModels: len(models),
 		Models:        models,
 	}, status, nil
-}
-
-func (a *NewAPIAccountAdapter) modelPricingProtocols(ctx context.Context, account domain.UpstreamAccount) map[string][]domain.Protocol {
-	resp, err := a.do(ctx, http.MethodGet, account, "/api/pricing", "", nil)
-	if err != nil || resp.statusCode < 200 || resp.statusCode >= 300 {
-		return nil
-	}
-	payload := decodeJSONBody(resp.body)
-	rawData, ok := payload["data"].([]any)
-	if !ok {
-		return nil
-	}
-	result := map[string][]domain.Protocol{}
-	for _, raw := range rawData {
-		item, ok := raw.(map[string]any)
-		if !ok {
-			continue
-		}
-		modelName, _ := item["model_name"].(string)
-		if strings.TrimSpace(modelName) == "" {
-			continue
-		}
-		protocols := protocolsFromNewAPIEndpointTypes(item["supported_endpoint_types"])
-		if len(protocols) > 0 {
-			result[modelName] = protocols
-		}
-	}
-	return result
-}
-
-func protocolsFromNewAPIEndpointTypes(raw any) []domain.Protocol {
-	items, ok := raw.([]any)
-	if !ok {
-		return nil
-	}
-	seen := map[domain.Protocol]bool{}
-	protocols := []domain.Protocol{}
-	add := func(protocol domain.Protocol) {
-		if !seen[protocol] {
-			seen[protocol] = true
-			protocols = append(protocols, protocol)
-		}
-	}
-	for _, item := range items {
-		value, _ := item.(string)
-		switch strings.ToLower(strings.TrimSpace(value)) {
-		case "openai", "chat", "chat_completions", "openai_chat_completions":
-			add(domain.ProtocolOpenAIChat)
-		case "openai-response", "openai-response-compact", "responses", "openai_responses":
-			add(domain.ProtocolOpenAIResponses)
-		case "anthropic", "messages", "anthropic_messages", "claude-messages":
-			add(domain.ProtocolAnthropicMessages)
-		case "gemini", "gemini_generate_content":
-			add(domain.ProtocolGeminiGenerate)
-		}
-	}
-	return protocols
 }
 
 func (a *NewAPIAccountAdapter) RefreshQuota(ctx context.Context, account domain.UpstreamAccount, apiKey string, accountCredential string) (domain.QuotaRefreshResult, error) {

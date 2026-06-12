@@ -760,60 +760,23 @@ func firstError(values ...error) error {
 	return nil
 }
 
-func resolveTestCallProtocol(upstreams store.UpstreamAccountStore, accountID string, modelName string, requested string) (string, error) {
+func resolveTestCallProtocol(modelName string, requested string) (string, error) {
 	modelName = strings.TrimSpace(modelName)
 	if modelName == "" {
 		return "", errors.New("model_name_required")
 	}
 	requested = strings.TrimSpace(requested)
-	if requested == "" || requested == "auto" {
-		requested = "auto"
-	}
-	protocols := supportedTestProtocolsForModel(upstreams.UpstreamModels(accountID), modelName)
-	if len(protocols) == 0 {
-		return "", errors.New("model_protocols_missing")
-	}
-	if requested == "auto" {
-		return protocols[0], nil
-	}
-	for _, protocol := range protocols {
-		if protocol == requested {
-			return requested, nil
+	switch requested {
+	case "", "auto":
+		if strings.Contains(strings.ToLower(modelName), "claude") {
+			return "claude-messages", nil
 		}
+		return "openai-chat", nil
+	case "openai-chat", "openai-responses", "claude-messages":
+		return requested, nil
+	default:
+		return "", errors.New("unsupported_protocol")
 	}
-	return "", errors.New("protocol_not_supported_by_model")
-}
-
-func supportedTestProtocolsForModel(models []domain.UpstreamSyncedModel, modelName string) []string {
-	seen := map[string]bool{}
-	protocols := []string{}
-	for _, model := range models {
-		if model.UpstreamModelName != modelName && model.NormalizedModelName != modelName {
-			continue
-		}
-		for _, protocol := range model.SupportedWireProtocols {
-			if mapped := testProtocolForWireProtocol(protocol); mapped != "" && !seen[mapped] {
-				seen[mapped] = true
-				protocols = append(protocols, mapped)
-			}
-		}
-		if len(protocols) == 0 {
-			if mapped := testProtocolForWireProtocol(model.NativeWireProtocol); mapped != "" {
-				protocols = append(protocols, mapped)
-			}
-		}
-		break
-	}
-	return protocols
-}
-
-func testProtocolForWireProtocol(protocol domain.Protocol) string {
-	caseMap := map[domain.Protocol]string{
-		domain.ProtocolOpenAIChat:        "openai-chat",
-		domain.ProtocolOpenAIResponses:   "openai-responses",
-		domain.ProtocolAnthropicMessages: "claude-messages",
-	}
-	return caseMap[protocol]
 }
 
 type testCallRequest struct {
@@ -854,7 +817,7 @@ func (h *Handler) handleTestCall(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	protocol, err := resolveTestCallProtocol(upstreams, account.ID, req.ModelName, req.Protocol)
+	protocol, err := resolveTestCallProtocol(req.ModelName, req.Protocol)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return

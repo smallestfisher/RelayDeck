@@ -14,10 +14,6 @@ import (
 
 func TestNewAPIAdapterSyncModelsUsesAPIKeyModelList(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/pricing" {
-			http.NotFound(w, r)
-			return
-		}
 		if r.URL.Path != "/v1/models" {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
@@ -43,39 +39,6 @@ func TestNewAPIAdapterSyncModelsUsesAPIKeyModelList(t *testing.T) {
 	}
 	if len(result.Models) != 2 || result.Models[0].NormalizedModelName != "gpt-4o-mini" {
 		t.Fatalf("unexpected models: %+v", result.Models)
-	}
-}
-
-func TestNewAPIAdapterSyncModelsUsesPricingEndpointTypes(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/v1/models":
-			writeTestJSON(t, w, map[string]any{"data": []map[string]any{{"id": "claude-sonnet-custom"}}})
-		case "/api/pricing":
-			writeTestJSON(t, w, map[string]any{
-				"success": true,
-				"data": []map[string]any{{
-					"model_name":               "claude-sonnet-custom",
-					"supported_endpoint_types": []string{"openai", "anthropic"},
-				}},
-			})
-		default:
-			t.Fatalf("unexpected path: %s", r.URL.Path)
-		}
-	}))
-	defer server.Close()
-
-	adapter := NewNewAPIAccountAdapter(server.Client(), time.Second)
-	result, _, err := adapter.SyncModels(context.Background(), accountForAdapter(server.URL, domain.PlatformKindNewAPI), "sk-test")
-	if err != nil {
-		t.Fatalf("sync models: %v", err)
-	}
-	if len(result.Models) != 1 {
-		t.Fatalf("unexpected models: %+v", result.Models)
-	}
-	protocols := result.Models[0].SupportedWireProtocols
-	if len(protocols) != 2 || protocols[0] != domain.ProtocolOpenAIChat || protocols[1] != domain.ProtocolAnthropicMessages {
-		t.Fatalf("expected pricing endpoint protocols, got %+v", protocols)
 	}
 }
 

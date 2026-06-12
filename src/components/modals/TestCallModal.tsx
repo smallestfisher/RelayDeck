@@ -1,5 +1,5 @@
 import { RotateCcw, Send, X } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { adminApi } from '../../lib/adminApi';
 import { formatLatency } from '../../lib/format';
@@ -19,12 +19,6 @@ const protocolLabels: Record<string, string> = {
   'openai-chat': 'OpenAI Chat',
   'openai-responses': 'OpenAI Responses',
   'claude-messages': 'Claude Messages',
-};
-
-const wireProtocolToTestProtocol: Record<string, string> = {
-  openai_chat_completions: 'openai-chat',
-  openai_responses: 'openai-responses',
-  anthropic_messages: 'claude-messages',
 };
 
 export function TestCallModal({ account, onClose, onStatusUpdate }: TestCallModalProps) {
@@ -64,13 +58,7 @@ export function TestCallModal({ account, onClose, onStatusUpdate }: TestCallModa
     };
   }, [account.id]);
 
-  const selectedModelInfo = useMemo(
-    () => models.find((item) => item.upstreamModelName === selectedModel || item.normalizedModelName === selectedModel),
-    [models, selectedModel]
-  );
-  const protocolOptions = useMemo(() => supportedTestProtocols(selectedModelInfo), [selectedModelInfo]);
-  const canSend = Boolean(selectedModel && protocolOptions.length > 0);
-  const protocolHint = protocolOptions.length > 0 ? '自动会按模型支持协议选择第一个可测试协议' : '该模型没有当前支持的测试协议';
+  const canSend = Boolean(selectedModel);
 
   function handleReset() {
     setProtocol('auto');
@@ -133,14 +121,12 @@ export function TestCallModal({ account, onClose, onStatusUpdate }: TestCallModa
             </select>
           </Field>
 
-          <Field label="协议" hint={protocolHint} danger={protocolOptions.length === 0 && Boolean(selectedModel)}>
-            <select className={inputClass} value={protocol} onChange={(event) => setProtocol(event.target.value)} disabled={protocolOptions.length === 0}>
+          <Field label="协议" hint="自动会按模型名称选择 OpenAI 或 Anthropic；也可以手动指定协议">
+            <select className={inputClass} value={protocol} onChange={(event) => setProtocol(event.target.value)}>
               <option value="auto">自动</option>
-              {protocolOptions.map((item) => (
-                <option key={item} value={item}>
-                  {protocolLabels[item]}
-                </option>
-              ))}
+              <option value="openai-chat">OpenAI Chat</option>
+              <option value="openai-responses">OpenAI Responses</option>
+              <option value="claude-messages">Claude Messages</option>
             </select>
           </Field>
 
@@ -200,20 +186,6 @@ export function TestCallModal({ account, onClose, onStatusUpdate }: TestCallModa
     </>,
     document.body
   );
-}
-
-function supportedTestProtocols(model?: UpstreamModel): string[] {
-  if (!model) return [];
-  const seen = new Set<string>();
-  const result: string[] = [];
-  for (const protocol of model.supportedWireProtocols) {
-    const mapped = wireProtocolToTestProtocol[protocol];
-    if (mapped && !seen.has(mapped)) {
-      seen.add(mapped);
-      result.push(mapped);
-    }
-  }
-  return result;
 }
 
 function Field({ label, hint, danger, children }: { label: string; hint?: string; danger?: boolean; children: React.ReactNode }) {
