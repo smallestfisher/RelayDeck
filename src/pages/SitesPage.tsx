@@ -448,10 +448,10 @@ export function SitesPage() {
             events.map((event) => (
               <div key={event.id} className="rounded-lg border border-line bg-elevated/45 p-4">
                 <div className="flex items-center justify-between gap-3">
-                  <span className="text-sm font-medium text-text">{event.operation}</span>
-                  <span className="text-xs text-muted">{event.createdAt}</span>
+                  <span className="text-sm font-medium text-text">{operationText(event.operation)}</span>
+                  <span className="text-xs text-muted">{formatEventTime(event.createdAt)}</span>
                 </div>
-                <div className="mt-2 text-sm text-muted">{event.message || event.status}</div>
+                <div className="mt-2 text-sm text-muted">{event.message || eventStatusText(event.status)}</div>
               </div>
             ))
           )}
@@ -478,6 +478,36 @@ function formatDetailLatency(latencyMs: number, lastApiCheckedAt?: string): stri
 
 function formatDetailModelCount(modelCount: number, lastModelSyncedAt?: string): string {
   return lastModelSyncedAt ? formatNumber(modelCount) : '-';
+}
+
+function operationText(operation: string): string {
+  const map: Record<string, string> = {
+    test_api: '测试 API',
+    test_account: '检测账号凭据',
+    sync_models: '同步模型',
+    refresh_quota: '刷新额度',
+    checkin: '签到',
+    refresh_all: '全量刷新',
+  };
+  return map[operation] ?? operation;
+}
+
+function eventStatusText(status: string): string {
+  const map: Record<string, string> = {
+    success: '成功',
+    failed: '失败',
+    not_found: '未找到',
+  };
+  return map[status] ?? status;
+}
+
+function formatEventTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value || '-';
+  }
+  const pad = (part: number) => String(part).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }
 
 function batchSummary(results: UpstreamActionResult[]): string {
