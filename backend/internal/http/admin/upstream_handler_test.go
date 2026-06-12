@@ -239,6 +239,18 @@ func TestTestCallUpdatesAPIStatus(t *testing.T) {
 	}}); err != nil {
 		t.Fatalf("seed models: %v", err)
 	}
+	if err := fakeStore.UpsertUpstreamAccountStatus(domain.UpstreamAccountStatus{
+		UpstreamAccountID: account.ID,
+		APIStatus:         domain.UpstreamAPIStatusUnknown,
+		AccountStatus:     domain.AccountCredentialStatusActionRequired,
+		CheckinStatus:     domain.CheckinStatusUnsupported,
+		ModelCount:        3,
+		LatencyMS:         188,
+		LastModelSyncedAt: fixedAdminNow(),
+		UpdatedAt:         fixedAdminNow(),
+	}); err != nil {
+		t.Fatalf("seed status: %v", err)
+	}
 
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/upstreams/accounts/"+account.ID+"/test-call", strings.NewReader(`{"model_name":"gpt-4o-mini","protocol":"auto","message":"hello"}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -256,8 +268,11 @@ func TestTestCallUpdatesAPIStatus(t *testing.T) {
 		t.Fatalf("unexpected test response: %+v", response)
 	}
 	status, ok := fakeStore.UpstreamAccountStatus(account.ID)
-	if !ok || status.APIStatus != domain.UpstreamAPIStatusHealthy || status.APILatencyMS != 42 || status.LatencyMS != 0 || status.LastAPICheckedAt.IsZero() {
+	if !ok || status.APIStatus != domain.UpstreamAPIStatusHealthy || status.APILatencyMS != 42 || status.LastAPICheckedAt.IsZero() {
 		t.Fatalf("expected healthy API status, got %+v", status)
+	}
+	if status.LatencyMS != 188 || status.ModelCount != 3 || status.LastModelSyncedAt.IsZero() {
+		t.Fatalf("expected test call to preserve site latency and model sync status, got %+v", status)
 	}
 }
 

@@ -508,7 +508,7 @@ func mergeActionStatus(action string, existing domain.UpstreamAccountStatus, sta
 		status.CheckinStatus = existing.CheckinStatus
 		status.LastCheckinAt = existing.LastCheckinAt
 	}
-	if action != "test-api" && action != "sync-models" && action != "refresh-all" {
+	if action != "sync-models" && action != "refresh-all" {
 		status.ModelCount = existing.ModelCount
 		status.LastModelSyncedAt = existing.LastModelSyncedAt
 	}

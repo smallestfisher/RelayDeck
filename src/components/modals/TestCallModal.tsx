@@ -1,6 +1,7 @@
 import { RotateCcw, Send, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { SelectControl } from '../ui/Controls';
 import { adminApi } from '../../lib/adminApi';
 import { formatLatency } from '../../lib/format';
 import type { UpstreamAccount, UpstreamModel, UpstreamTestCallResult } from '../../types';
@@ -110,24 +111,30 @@ export function TestCallModal({ account, onClose, onStatusUpdate }: TestCallModa
             <div className="rounded-lg border border-line bg-elevated px-3 py-2 text-sm text-muted">{account.name}</div>
           </Field>
 
-          <Field label="模型" hint={modelError || '模型来自已同步的数据库记录；如果为空，请先执行全量刷新'} danger={Boolean(modelError)}>
-            <select className={inputClass} value={selectedModel} onChange={(event) => setSelectedModel(event.target.value)}>
-              {models.length === 0 && <option value="">暂无可用模型</option>}
-              {models.map((model) => (
-                <option key={model.id} value={model.upstreamModelName}>
-                  {model.displayName || model.upstreamModelName}
-                </option>
-              ))}
-            </select>
+          <Field label="模型" hint={modelError || '模型来自已同步的数据库记录;如果为空,请先执行全量刷新'} danger={Boolean(modelError)}>
+            <SelectControl
+              searchable
+              placeholder="暂无可用模型"
+              value={selectedModel}
+              onChange={(event) => setSelectedModel(event.target.value)}
+              options={models.map((model) => ({
+                label: model.displayName || model.upstreamModelName,
+                value: model.upstreamModelName,
+              }))}
+            />
           </Field>
 
-          <Field label="协议" hint="自动会按模型名称选择 OpenAI 或 Anthropic；也可以手动指定协议">
-            <select className={inputClass} value={protocol} onChange={(event) => setProtocol(event.target.value)}>
-              <option value="auto">自动</option>
-              <option value="openai-chat">OpenAI Chat</option>
-              <option value="openai-responses">OpenAI Responses</option>
-              <option value="claude-messages">Claude Messages</option>
-            </select>
+          <Field label="协议" hint="自动会按模型名称选择 OpenAI 或 Anthropic;也可以手动指定协议">
+            <SelectControl
+              value={protocol}
+              onChange={(event) => setProtocol(event.target.value)}
+              options={[
+                { label: '自动', value: 'auto' },
+                { label: 'OpenAI Chat', value: 'openai-chat' },
+                { label: 'OpenAI Responses', value: 'openai-responses' },
+                { label: 'Claude Messages', value: 'claude-messages' },
+              ]}
+            />
           </Field>
 
           <Field label="流式响应">

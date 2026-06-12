@@ -278,7 +278,7 @@ export function SitesPage() {
 
   function applyStatusUpdate(accountId: string, status?: UpstreamAccount['status']) {
     setAccounts((current) => applyStatusUpdateToAccounts(current, accountId, status));
-    setTestCallAccount((current) => (current && current.id === accountId && status ? { ...current, status: { ...current.status, ...status } } : current));
+    setTestCallAccount((current) => (current && current.id === accountId && status ? { ...current, status: mergeAPITestStatus(current.status, status) } : current));
   }
 
   function openCreateDrawer() {
@@ -519,7 +519,19 @@ function formatDetailModelCount(modelCount: number, lastModelSyncedAt?: string):
 
 function applyStatusUpdateToAccounts(accounts: UpstreamAccount[], accountId: string, status?: UpstreamAccount['status']): UpstreamAccount[] {
   if (!status) return accounts;
-  return accounts.map((account) => (account.id === accountId ? { ...account, status: { ...account.status, ...status } } : account));
+  return accounts.map((account) => (account.id === accountId ? { ...account, status: mergeAPITestStatus(account.status, status) } : account));
+}
+
+function mergeAPITestStatus(current: UpstreamAccount['status'], incoming: UpstreamAccount['status']): UpstreamAccount['status'] {
+  return {
+    ...current,
+    apiStatus: incoming.apiStatus,
+    apiLatencyMs: incoming.apiLatencyMs,
+    lastApiCheckedAt: incoming.lastApiCheckedAt,
+    lastErrorClass: incoming.lastErrorClass,
+    lastErrorMessage: incoming.lastErrorMessage,
+    updatedAt: incoming.updatedAt,
+  };
 }
 
 function operationText(operation: string): string {
