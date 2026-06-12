@@ -82,7 +82,7 @@ export function Topbar({ theme, user, onThemeToggle, onLogout, onNavigate }: Top
         <div className="flex items-center rounded-full border border-line bg-elevated p-1">
           <button
             type="button"
-            className="flex h-7 w-8 items-center justify-center rounded-full text-muted hover:text-text"
+            className={`flex h-7 w-8 items-center justify-center rounded-full transition ${theme === 'light' ? 'bg-primary text-white' : 'text-muted hover:text-text'}`}
             onClick={onThemeToggle}
             aria-label="切换浅色主题"
           >
@@ -90,11 +90,11 @@ export function Topbar({ theme, user, onThemeToggle, onLogout, onNavigate }: Top
           </button>
           <button
             type="button"
-            className="flex h-7 w-8 items-center justify-center rounded-full bg-primary text-white"
+            className={`flex h-7 w-8 items-center justify-center rounded-full transition ${theme === 'dark' ? 'bg-primary text-white' : 'text-muted hover:text-text'}`}
             onClick={onThemeToggle}
             aria-label="切换深色主题"
           >
-            {theme === 'dark' ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
+            <Moon className="h-4 w-4" />
           </button>
         </div>
         <Button variant="icon" aria-label="刷新">

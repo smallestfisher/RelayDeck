@@ -85,18 +85,14 @@ export function SiteTable({
               </td>
               <td className={tableCellClass}>{formatModelCount(account.status.modelCount, account.status.lastModelSyncedAt)}</td>
               <td className={tableCellClass}>
-                <span
-                  className={
-                    !account.status.lastApiCheckedAt && !account.status.lastModelSyncedAt
-                      ? ''
-                      : displayLatencyForTone(account.status.latencyMs, account.status.lastModelSyncedAt, account.status.apiLatencyMs, account.status.lastApiCheckedAt) < 200
-                        ? 'text-green-500'
-                        : displayLatencyForTone(account.status.latencyMs, account.status.lastModelSyncedAt, account.status.apiLatencyMs, account.status.lastApiCheckedAt) < 500
-                          ? 'text-yellow-500'
-                          : 'text-red-500'
-                  }
-                >
-                  {formatLatencyPair(account.status.latencyMs, account.status.lastModelSyncedAt, account.status.apiLatencyMs, account.status.lastApiCheckedAt)}
+                <span>
+                  <span className={latencyToneClass(account.status.latencyMs, account.status.lastModelSyncedAt)}>
+                    {account.status.lastModelSyncedAt ? formatCompactLatency(account.status.latencyMs) : '-'}
+                  </span>
+                  <span className="text-muted"> / </span>
+                  <span className={latencyToneClass(account.status.apiLatencyMs, account.status.lastApiCheckedAt)}>
+                    {account.status.lastApiCheckedAt ? formatCompactLatency(account.status.apiLatencyMs) : '-'}
+                  </span>
                 </span>
               </td>
               <td className={tableCellClass}>
@@ -133,20 +129,15 @@ function formatModelCount(modelCount: number, lastModelSyncedAt?: string): strin
   return lastModelSyncedAt ? formatNumber(modelCount) : '-';
 }
 
-function formatLatencyPair(siteLatencyMs: number, lastModelSyncedAt: string | undefined, apiLatencyMs: number, lastApiCheckedAt: string | undefined): string {
-  const site = lastModelSyncedAt ? formatCompactLatency(siteLatencyMs) : '-';
-  const api = lastApiCheckedAt ? formatCompactLatency(apiLatencyMs) : '-';
-  return `${site}/${api}`;
-}
-
 function formatCompactLatency(latencyMs: number): string {
   return formatLatency(latencyMs).replace(' ', '');
 }
 
-function displayLatencyForTone(siteLatencyMs: number, lastModelSyncedAt: string | undefined, apiLatencyMs: number, lastApiCheckedAt: string | undefined): number {
-  if (lastApiCheckedAt) return apiLatencyMs;
-  if (lastModelSyncedAt) return siteLatencyMs;
-  return 0;
+function latencyToneClass(latencyMs: number, lastChecked: string | undefined): string {
+  if (!lastChecked) return '';
+  if (latencyMs < 200) return 'text-success';
+  if (latencyMs < 500) return 'text-warning';
+  return 'text-danger';
 }
 
 function avatarText(name: string): string {

@@ -113,6 +113,16 @@ button {
   outline-color: rgb(var(--color-primary) / 0.75);
 }
 
+select option {
+  background: rgb(var(--color-elevated));
+  color: rgb(var(--color-text));
+  padding: 0.5rem;
+}
+
+.dark select option {
+  background: rgb(var(--color-panel));
+}
+
 .thin-scrollbar {
   scrollbar-width: thin;
   scrollbar-color: rgb(var(--color-line)) transparent;

@@ -5,9 +5,12 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/smallestfisher/relaydeck/backend/internal/domain"
+	"github.com/smallestfisher/relaydeck/backend/internal/store"
 )
 
 type UpstreamStore struct {
@@ -72,6 +75,158 @@ func (s *UpstreamStore) ListUpstreamAccountsPage(limit int, offset int) ([]domai
 		accounts = append(accounts, account)
 	}
 	return accounts, total
+}
+
+func (s *UpstreamStore) FilterUpstreamAccounts(filter store.UpstreamAccountFilter) ([]domain.UpstreamAccount, store.UpstreamAccountMetrics) {
+	if filter.Limit <= 0 {
+		filter.Limit = 50
+	}
+	if filter.Limit > 200 {
+		filter.Limit = 200
+	}
+	if filter.Offset < 0 {
+		filter.Offset = 0
+	}
+
+	// Build dynamic WHERE clause by joining account and status tables.
+	// effective_api_status: if account is disabled, override to 'disabled'.
+	// effective_account_status: when no status row exists and account has no credential, use 'not_configured'; with credential, 'action_required'.
+	// effective_latency: prefer api_latency_ms when last_api_checked_at is set, else latency_ms when last_model_synced_at is set, else 0.
+	baseQuery := `
+WITH joined AS (
+  SELECT a.*,
+    CASE WHEN NOT a.enabled THEN 'disabled'
+         WHEN COALESCE(s.api_status, 'unknown') = '' THEN 'unknown'
+         ELSE COALESCE(s.api_status, 'unknown')
+    END AS effective_api_status,
+    CASE WHEN s.upstream_account_id IS NULL THEN
+           CASE WHEN a.account_credential_kind != 'none' AND a.account_credential_enc != '' THEN 'action_required'
+                ELSE 'not_configured'
+           END
+         WHEN COALESCE(s.account_status, 'not_configured') = '' THEN 'not_configured'
+         ELSE COALESCE(s.account_status, 'not_configured')
+    END AS effective_account_status,
+    COALESCE(s.checkin_status, 'unsupported') AS effective_checkin_status,
+    COALESCE(s.model_count, 0) AS s_model_count,
+    COALESCE(s.latency_ms, 0) AS s_latency_ms,
+    COALESCE(s.api_latency_ms, 0) AS s_api_latency_ms,
+    CASE WHEN s.last_api_checked_at IS NOT NULL THEN COALESCE(s.api_latency_ms, 0)
+         WHEN s.last_model_synced_at IS NOT NULL THEN COALESCE(s.latency_ms, 0)
+         ELSE 0
+    END AS effective_latency
+  FROM upstream_accounts a
+  LEFT JOIN upstream_account_status s ON s.upstream_account_id = a.id
+)`
+
+	var conditions []string
+	var args []any
+	argIdx := 1
+
+	if filter.Query != "" {
+		pattern := "%" + strings.ToLower(filter.Query) + "%"
+		conditions = append(conditions, fmt.Sprintf(
+			`(lower(name) LIKE $%d OR lower(base_url) LIKE $%d OR lower(note) LIKE $%d)`,
+			argIdx, argIdx, argIdx))
+		args = append(args, pattern)
+		argIdx++
+	}
+	if filter.PlatformKind != "" {
+		conditions = append(conditions, fmt.Sprintf(`platform_kind = $%d`, argIdx))
+		args = append(args, filter.PlatformKind)
+		argIdx++
+	}
+	if filter.APIStatus != "" {
+		conditions = append(conditions, fmt.Sprintf(`effective_api_status = $%d`, argIdx))
+		args = append(args, filter.APIStatus)
+		argIdx++
+	}
+	if filter.AccountStatus != "" {
+		conditions = append(conditions, fmt.Sprintf(`effective_account_status = $%d`, argIdx))
+		args = append(args, filter.AccountStatus)
+		argIdx++
+	}
+	if filter.LatencyBand != "" {
+		switch filter.LatencyBand {
+		case "unknown":
+			conditions = append(conditions, `effective_latency <= 0`)
+		case "low":
+			conditions = append(conditions, `effective_latency > 0 AND effective_latency < 300`)
+		case "medium":
+			conditions = append(conditions, `effective_latency >= 300 AND effective_latency <= 1000`)
+		case "high":
+			conditions = append(conditions, `effective_latency > 1000`)
+		}
+	}
+
+	whereClause := ""
+	if len(conditions) > 0 {
+		whereClause = "WHERE " + strings.Join(conditions, " AND ")
+	}
+
+	// Single query: get paginated rows + metrics via window functions.
+	fullSQL := baseQuery + fmt.Sprintf(`
+SELECT
+  id::text, name, code, platform_kind, base_url, enabled, include_in_routing, priority,
+  api_key_enc, api_key_prefix, account_credential_kind, account_credential_enc,
+  auto_sync_models, auto_refresh_quota, auto_checkin, note, created_at, updated_at,
+  count(*) OVER () AS filtered_total,
+  count(*) FILTER (WHERE enabled AND effective_api_status = 'healthy') OVER () AS cnt_healthy,
+  count(*) FILTER (WHERE effective_api_status = 'warning' OR effective_account_status = 'expired') OVER () AS cnt_warning,
+  count(*) FILTER (WHERE effective_account_status = 'action_required') OVER () AS cnt_manual
+FROM joined
+%s
+ORDER BY priority DESC, created_at DESC
+LIMIT $%d OFFSET $%d`, whereClause, argIdx, argIdx+1)
+
+	args = append(args, filter.Limit, filter.Offset)
+
+	rows, err := s.db.QueryContext(context.Background(), fullSQL, args...)
+	if err != nil {
+		return nil, store.UpstreamAccountMetrics{}
+	}
+	defer rows.Close()
+
+	var accounts []domain.UpstreamAccount
+	var metrics store.UpstreamAccountMetrics
+	for rows.Next() {
+		var account domain.UpstreamAccount
+		var platformKind, credentialKind string
+		var filteredTotal, cntHealthy, cntWarning, cntManual int
+		if err := rows.Scan(
+			&account.ID,
+			&account.Name,
+			&account.Code,
+			&platformKind,
+			&account.BaseURL,
+			&account.Enabled,
+			&account.IncludeInRouting,
+			&account.Priority,
+			&account.APIKeyEncrypted,
+			&account.APIKeyPrefix,
+			&credentialKind,
+			&account.AccountCredentialEncrypted,
+			&account.AutoSyncModels,
+			&account.AutoRefreshQuota,
+			&account.AutoCheckin,
+			&account.Note,
+			&account.CreatedAt,
+			&account.UpdatedAt,
+			&filteredTotal,
+			&cntHealthy,
+			&cntWarning,
+			&cntManual,
+		); err != nil {
+			return nil, store.UpstreamAccountMetrics{}
+		}
+		account.PlatformKind = domain.UpstreamPlatformKind(platformKind)
+		account.AccountCredentialKind = domain.UpstreamCredentialKind(credentialKind)
+		accounts = append(accounts, account)
+		metrics.Total = filteredTotal
+		metrics.Healthy = cntHealthy
+		metrics.Warning = cntWarning
+		metrics.Manual = cntManual
+	}
+	return accounts, metrics
 }
 
 func (s *UpstreamStore) UpstreamAccount(id string) (domain.UpstreamAccount, bool) {

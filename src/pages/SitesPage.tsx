@@ -1,5 +1,5 @@
-import { Activity, AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight, Plus, RefreshCw, RotateCcw, ShieldCheck, Signal, Trash2, XCircle } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { Activity, AlertTriangle, ChevronLeft, ChevronRight, Plus, RefreshCw, ShieldCheck, Signal, Trash2, XCircle } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { SearchInput, SelectControl } from '../components/ui/Controls';
@@ -13,11 +13,11 @@ import type {
   UpstreamAccount,
   UpstreamAccountEvent,
   UpstreamAccountInput,
+  UpstreamAccountMetrics,
   UpstreamActionResult,
   UpstreamActionName,
   UpstreamAPIStatus,
   UpstreamBatchActionName,
-  UpstreamCheckinStatus,
   UpstreamPlatformKind,
 } from '../types';
 import { SiteDrawer } from './sites/SiteDrawer';
@@ -40,12 +40,17 @@ const pageSizeOptions = [
   { label: '100 / 页', value: '100' },
 ];
 
+const emptyMetrics: UpstreamAccountMetrics = { total: 0, healthy: 0, warning: 0, manual: 0 };
+
+const SEARCH_DEBOUNCE_MS = 300;
+
 export function SitesPage() {
   const [accounts, setAccounts] = useState<UpstreamAccount[]>([]);
   const [events, setEvents] = useState<UpstreamAccountEvent[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [busyIds, setBusyIds] = useState<string[]>([]);
   const [query, setQuery] = useState('');
+  const [debouncedQuery, setDebouncedQuery] = useState('');
   const [platform, setPlatform] = useState<UpstreamPlatformKind | 'all'>('all');
   const [apiStatus, setApiStatus] = useState<UpstreamAPIStatus | 'all'>('all');
   const [accountStatus, setAccountStatus] = useState<AccountCredentialStatus | 'all'>('all');
@@ -65,60 +70,69 @@ export function SitesPage() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
   const [total, setTotal] = useState(0);
+  const [metrics, setMetrics] = useState<UpstreamAccountMetrics>(emptyMetrics);
+  const requestSeq = useRef(0);
 
+  // Debounce the search input so each keystroke doesn't hit the backend.
   useEffect(() => {
-    void loadAccounts(page, pageSize);
+    const timer = window.setTimeout(() => setDebouncedQuery(query.trim()), SEARCH_DEBOUNCE_MS);
+    return () => window.clearTimeout(timer);
+  }, [query]);
+
+  // Reset to first page and drop the (now possibly invalid) selection
+  // whenever any filter dimension changes.
+  useEffect(() => {
+    setPage(1);
+    setSelectedIds([]);
+  }, [accountStatus, apiStatus, latencyBand, platform, debouncedQuery]);
+
+  // Drop selection when the visible page changes — selected ids on a hidden
+  // page would otherwise be acted on by batch operations the user can't see.
+  useEffect(() => {
+    setSelectedIds([]);
   }, [page, pageSize]);
 
   useEffect(() => {
-    setPage(1);
-  }, [accountStatus, apiStatus, latencyBand, platform, query]);
+    void loadAccounts();
+    // loadAccounts reads the latest filter state via closure; depend on the
+    // primitive filter values so we refetch on any change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, pageSize, debouncedQuery, platform, apiStatus, accountStatus, latencyBand]);
 
-  const filteredAccounts = useMemo(() => {
-    const keyword = query.trim().toLowerCase();
-    return accounts.filter((account) => {
-      const matchesQuery =
-        !keyword ||
-        account.name.toLowerCase().includes(keyword) ||
-        account.baseUrl.toLowerCase().includes(keyword) ||
-        account.note.toLowerCase().includes(keyword);
-      const matchesPlatform = platform === 'all' || account.platformKind === platform;
-      const matchesAPIStatus = apiStatus === 'all' || account.status.apiStatus === apiStatus;
-      const matchesAccountStatus = accountStatus === 'all' || account.status.accountStatus === accountStatus;
-      const matchesLatency = latencyBand === 'all' || latencyMatches(account.status.latencyMs, latencyBand);
-      return matchesQuery && matchesPlatform && matchesAPIStatus && matchesAccountStatus && matchesLatency;
-    });
-  }, [accounts, accountStatus, apiStatus, latencyBand, platform, query]);
-
-  const metrics = useMemo(() => {
-    const healthy = accounts.filter((account) => account.enabled && account.status.apiStatus === 'healthy').length;
-    const warning = accounts.filter((account) => account.status.apiStatus === 'warning' || account.status.accountStatus === 'expired').length;
-    const manual = accounts.filter(
-      (account) =>
-        account.status.accountStatus === 'action_required' ||
-        account.status.accountStatus === 'not_configured'
-    ).length;
-    return { total, healthy, warning, manual };
-  }, [accounts, total]);
-
-  async function loadAccounts(nextPage = page, nextPageSize = pageSize) {
+  async function loadAccounts() {
+    const seq = ++requestSeq.current;
     setLoading(true);
     setError('');
     setBatchNotice('');
     try {
-      const offset = (nextPage - 1) * nextPageSize;
-      const payload = await adminApi.listUpstreamAccounts({ limit: nextPageSize, offset });
-      if (payload.items.length === 0 && payload.total > 0 && offset >= payload.total && nextPage > 1) {
+      const offset = (page - 1) * pageSize;
+      const payload = await adminApi.listUpstreamAccounts({
+        limit: pageSize,
+        offset,
+        q: debouncedQuery || undefined,
+        platformKind: platform === 'all' ? undefined : platform,
+        apiStatus: apiStatus === 'all' ? undefined : apiStatus,
+        accountStatus: accountStatus === 'all' ? undefined : accountStatus,
+        latencyBand: latencyBand === 'all' ? undefined : latencyBand,
+      });
+      // A newer request started while we were waiting — drop this stale response.
+      if (seq !== requestSeq.current) return;
+      // Result page is empty but the filter still has matches: caller is past
+      // the last page, walk back.
+      if (payload.items.length === 0 && payload.total > 0 && offset >= payload.total && page > 1) {
         setTotal(payload.total);
-        setPage(Math.ceil(payload.total / nextPageSize));
+        setMetrics(payload.metrics ?? { ...emptyMetrics, total: payload.total });
+        setPage(Math.ceil(payload.total / pageSize));
         return;
       }
       setAccounts(payload.items);
       setTotal(payload.total);
+      setMetrics(payload.metrics ?? { ...emptyMetrics, total: payload.total });
     } catch (err) {
+      if (seq !== requestSeq.current) return;
       setError(err instanceof Error ? err.message : '加载站点失败');
     } finally {
-      setLoading(false);
+      if (seq === requestSeq.current) setLoading(false);
     }
   }
 
@@ -138,7 +152,7 @@ export function SitesPage() {
       }
       setDrawerOpen(false);
       setEditingAccount(null);
-      await loadAccounts(page, pageSize);
+      await loadAccounts();
     } catch (err) {
       setDrawerError(err instanceof Error ? err.message : '保存失败');
     } finally {
@@ -165,21 +179,22 @@ export function SitesPage() {
 
   async function runBatch(action: UpstreamBatchActionName) {
     if (selectedIds.length === 0) return;
-    setBusyIds((current) => [...new Set([...current, ...selectedIds])]);
+    const targetIds = selectedIds;
+    setBusyIds((current) => [...new Set([...current, ...targetIds])]);
     setError('');
     setBatchNotice('');
     try {
-      const results = await adminApi.runBatchUpstreamAction(selectedIds, action);
+      const results = await adminApi.runBatchUpstreamAction(targetIds, action);
       applyActionResults(results);
       setBatchNotice(batchSummary(results));
     } catch (err) {
       setError(err instanceof Error ? err.message : '批量操作失败');
     } finally {
-      setBusyIds((current) => current.filter((id) => !selectedIds.includes(id)));
+      setBusyIds((current) => current.filter((id) => !targetIds.includes(id)));
     }
   }
 
-  async function deleteAccount(account: UpstreamAccount) {
+  function deleteAccount(account: UpstreamAccount) {
     setDeleteTarget(account);
   }
 
@@ -192,7 +207,7 @@ export function SitesPage() {
       await adminApi.deleteUpstreamAccount(target.id);
       setSelectedIds((current) => current.filter((id) => id !== target.id));
       setDeleteTarget(null);
-      await loadAccounts(page, pageSize);
+      await loadAccounts();
     } catch (err) {
       setError(err instanceof Error ? err.message : '删除失败');
     } finally {
@@ -203,18 +218,29 @@ export function SitesPage() {
 
   async function confirmBatchDelete() {
     if (selectedIds.length === 0) return;
+    const targetIds = selectedIds;
     setDeleting(true);
-    setBusyIds((current) => [...new Set([...current, ...selectedIds])]);
+    setBusyIds((current) => [...new Set([...current, ...targetIds])]);
     setError('');
+    setBatchNotice('');
     try {
-      await Promise.all(selectedIds.map((id) => adminApi.deleteUpstreamAccount(id)));
-      setSelectedIds([]);
-      setBatchDeleteConfirm(false);
-      await loadAccounts(page, pageSize);
+      const results = await adminApi.batchDeleteUpstreamAccounts(targetIds);
+      const deletedIds = new Set(
+        results.filter((item) => item.status === 'success' || item.status === 'not_found').map((item) => item.id)
+      );
+      setSelectedIds((current) => current.filter((id) => !deletedIds.has(id)));
+      const failed = results.filter((item) => item.status === 'failed');
+      if (failed.length > 0) {
+        setError(`批量删除完成：成功 ${deletedIds.size}，失败 ${failed.length}`);
+      } else {
+        setBatchNotice(`批量删除完成：成功 ${deletedIds.size}`);
+        setBatchDeleteConfirm(false);
+      }
+      await loadAccounts();
     } catch (err) {
       setError(err instanceof Error ? err.message : '批量删除失败');
     } finally {
-      setBusyIds((current) => current.filter((id) => !selectedIds.includes(id)));
+      setBusyIds((current) => current.filter((id) => !targetIds.includes(id)));
       setDeleting(false);
     }
   }
@@ -232,8 +258,11 @@ export function SitesPage() {
     setSelectedIds((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]));
   }
 
+  // toggleAll only operates on the currently visible page. This is intentional:
+  // selection no longer leaks across pages or filter changes (effects above
+  // clear it), so "select all" should match what the user can see.
   function toggleAll() {
-    const visibleIds = filteredAccounts.map((account) => account.id);
+    const visibleIds = accounts.map((account) => account.id);
     const allSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedIds.includes(id));
     setSelectedIds(allSelected ? selectedIds.filter((id) => !visibleIds.includes(id)) : [...new Set([...selectedIds, ...visibleIds])]);
   }
@@ -249,7 +278,7 @@ export function SitesPage() {
 
   function applyStatusUpdate(accountId: string, status?: UpstreamAccount['status']) {
     setAccounts((current) => applyStatusUpdateToAccounts(current, accountId, status));
-    setTestCallAccount((current) => (current && current.id === accountId && status ? { ...current, status } : current));
+    setTestCallAccount((current) => (current && current.id === accountId && status ? { ...current, status: { ...current.status, ...status } } : current));
   }
 
   function openCreateDrawer() {
@@ -282,10 +311,10 @@ export function SitesPage() {
       </div>
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <MetricCard label="站点总数" value={formatNumber(metrics.total)} detail="已接入账号" delta="" tone="info" icon={<Signal className="h-6 w-6" />} />
+        <MetricCard label="站点总数" value={formatNumber(metrics.total)} detail={metricsDetail(metrics.total, debouncedQuery, platform, apiStatus, accountStatus, latencyBand)} delta="" tone="info" icon={<Signal className="h-6 w-6" />} />
         <MetricCard label="健康 API" value={formatNumber(metrics.healthy)} detail="可用于模型调用" delta="" tone="success" icon={<ShieldCheck className="h-6 w-6" />} />
         <MetricCard label="异常警告" value={formatNumber(metrics.warning)} detail="需复查状态" delta="" tone="warning" icon={<AlertTriangle className="h-6 w-6" />} />
-        <MetricCard label="待处理" value={formatNumber(metrics.manual)} detail="凭据或人工动作" delta="" tone="danger" icon={<XCircle className="h-6 w-6" />} />
+        <MetricCard label="待处理" value={formatNumber(metrics.manual)} detail="需人工处理" delta="" tone="danger" icon={<XCircle className="h-6 w-6" />} />
       </div>
 
       <Card>
@@ -306,11 +335,8 @@ export function SitesPage() {
           />
           <SelectControl className="w-36" options={latencyOptions} value={latencyBand} onChange={(event) => setLatencyBand(event.target.value as LatencyBand)} />
           <div className="ml-auto flex flex-wrap justify-end gap-2">
-            <Button variant="secondary" icon={<RefreshCw className="h-4 w-4" />} onClick={() => void loadAccounts(page, pageSize)} disabled={loading}>
+            <Button variant="secondary" icon={<RefreshCw className="h-4 w-4" />} onClick={() => void loadAccounts()} disabled={loading}>
               刷新
-            </Button>
-            <Button variant="secondary" icon={<Activity className="h-4 w-4" />} onClick={() => runBatch('test-api')} disabled={selectedActionDisabled}>
-              批量检测 API
             </Button>
             <Button variant="secondary" icon={<RefreshCw className="h-4 w-4" />} onClick={() => runBatch('refresh-all')} disabled={selectedActionDisabled}>
               批量全量刷新
@@ -326,11 +352,11 @@ export function SitesPage() {
 
         {loading ? (
           <div className="rounded-lg border border-line bg-elevated/45 py-12 text-center text-sm text-muted">加载中...</div>
-        ) : filteredAccounts.length === 0 ? (
+        ) : accounts.length === 0 ? (
           <div className="rounded-lg border border-line bg-elevated/45 py-12 text-center text-sm text-muted">暂无站点账号</div>
         ) : (
           <SiteTable
-            accounts={filteredAccounts}
+            accounts={accounts}
             selectedIds={selectedIds}
             busyIds={busyIds}
             onToggleSelected={toggleSelected}
@@ -439,10 +465,10 @@ export function SitesPage() {
             <div className="rounded-lg border border-line bg-elevated/45 p-4 text-sm text-muted">
               <div className="font-medium text-text">{inspectAccount.baseUrl}</div>
               <div className="mt-2 grid grid-cols-2 gap-2">
-                <span>API：{inspectAccount.status.apiStatus}</span>
+                <span>API：{apiStatusText(inspectAccount.status.apiStatus)}</span>
                 <span>站点/API：{formatDetailLatencyPair(inspectAccount.status)}</span>
                 <span>模型：{formatDetailModelCount(inspectAccount.status.modelCount, inspectAccount.status.lastModelSyncedAt)}</span>
-                <span>账号：{inspectAccount.status.accountStatus}</span>
+                <span>账号：{accountStatusText(inspectAccount.status.accountStatus)}</span>
               </div>
             </div>
           )}
@@ -467,13 +493,18 @@ export function SitesPage() {
   );
 }
 
-function latencyMatches(latencyMs: number, band: LatencyBand): boolean {
-  if (band === 'unknown') return !latencyMs;
-  if (!latencyMs) return false;
-  if (band === 'low') return latencyMs < 300;
-  if (band === 'medium') return latencyMs >= 300 && latencyMs <= 1000;
-  if (band === 'high') return latencyMs > 1000;
-  return true;
+function metricsDetail(
+  total: number,
+  query: string,
+  platform: UpstreamPlatformKind | 'all',
+  apiStatus: UpstreamAPIStatus | 'all',
+  accountStatus: AccountCredentialStatus | 'all',
+  latencyBand: LatencyBand,
+): string {
+  const hasFilter =
+    Boolean(query) || platform !== 'all' || apiStatus !== 'all' || accountStatus !== 'all' || latencyBand !== 'all';
+  if (hasFilter) return `匹配 ${formatNumber(total)} 个站点`;
+  return '已接入账号';
 }
 
 function formatDetailLatencyPair(status: UpstreamAccount['status']): string {
@@ -488,7 +519,7 @@ function formatDetailModelCount(modelCount: number, lastModelSyncedAt?: string):
 
 function applyStatusUpdateToAccounts(accounts: UpstreamAccount[], accountId: string, status?: UpstreamAccount['status']): UpstreamAccount[] {
   if (!status) return accounts;
-  return accounts.map((account) => (account.id === accountId ? { ...account, status } : account));
+  return accounts.map((account) => (account.id === accountId ? { ...account, status: { ...account.status, ...status } } : account));
 }
 
 function operationText(operation: string): string {
@@ -508,6 +539,28 @@ function eventStatusText(status: string): string {
     success: '成功',
     failed: '失败',
     not_found: '未找到',
+  };
+  return map[status] ?? status;
+}
+
+function apiStatusText(status: UpstreamAPIStatus): string {
+  const map: Record<UpstreamAPIStatus, string> = {
+    unknown: '未知',
+    healthy: '健康',
+    warning: '警告',
+    failed: '失败',
+    disabled: '禁用',
+  };
+  return map[status] ?? status;
+}
+
+function accountStatusText(status: AccountCredentialStatus): string {
+  const map: Record<AccountCredentialStatus, string> = {
+    not_configured: '未配置',
+    valid: '有效',
+    expired: '过期',
+    failed: '失败',
+    action_required: '需人工处理',
   };
   return map[status] ?? status;
 }

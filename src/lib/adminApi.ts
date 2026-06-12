@@ -41,17 +41,37 @@ async function requestJSON<T>(path: string, init: RequestInit = {}): Promise<T> 
 }
 
 export const adminApi = {
-  async listUpstreamAccounts(params: { limit?: number; offset?: number } = {}): Promise<UpstreamAccountPage> {
+  async listUpstreamAccounts(params: {
+    limit?: number;
+    offset?: number;
+    q?: string;
+    platformKind?: string;
+    apiStatus?: string;
+    accountStatus?: string;
+    latencyBand?: string;
+  } = {}): Promise<UpstreamAccountPage> {
     const query = new URLSearchParams();
     if (params.limit) query.set('limit', String(params.limit));
     if (params.offset) query.set('offset', String(params.offset));
+    if (params.q) query.set('q', params.q);
+    if (params.platformKind && params.platformKind !== 'all') query.set('platform_kind', params.platformKind);
+    if (params.apiStatus && params.apiStatus !== 'all') query.set('api_status', params.apiStatus);
+    if (params.accountStatus && params.accountStatus !== 'all') query.set('account_status', params.accountStatus);
+    if (params.latencyBand && params.latencyBand !== 'all') query.set('latency_band', params.latencyBand);
     const path = `/api/admin/upstreams/accounts${query.size > 0 ? `?${query.toString()}` : ''}`;
-    const payload = await requestJSON<{ items: RawUpstreamAccount[]; total?: number; limit?: number; offset?: number }>(path);
+    const payload = await requestJSON<{
+      items: RawUpstreamAccount[];
+      total?: number;
+      limit?: number;
+      offset?: number;
+      metrics?: { total: number; healthy: number; warning: number; manual: number };
+    }>(path);
     return {
       items: payload.items.map(mapUpstreamAccount),
       total: payload.total ?? payload.items.length,
       limit: payload.limit ?? params.limit ?? payload.items.length,
       offset: payload.offset ?? params.offset ?? 0,
+      metrics: payload.metrics,
     };
   },
 
@@ -93,6 +113,14 @@ export const adminApi = {
 
   async runBatchUpstreamAction(ids: string[], action: UpstreamBatchActionName): Promise<UpstreamActionResult[]> {
     const payload = await requestJSON<{ results: RawUpstreamActionResult[] }>(`/api/admin/upstreams/accounts/batch/${action}`, {
+      method: 'POST',
+      body: JSON.stringify({ ids }),
+    });
+    return payload.results.map(mapUpstreamActionResult);
+  },
+
+  async batchDeleteUpstreamAccounts(ids: string[]): Promise<UpstreamActionResult[]> {
+    const payload = await requestJSON<{ results: RawUpstreamActionResult[] }>('/api/admin/upstreams/accounts/batch/delete', {
       method: 'POST',
       body: JSON.stringify({ ids }),
     });

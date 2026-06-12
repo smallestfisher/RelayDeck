@@ -113,11 +113,19 @@ export interface UpstreamAccount {
   updatedAt: string;
 }
 
+export interface UpstreamAccountMetrics {
+  total: number;
+  healthy: number;
+  warning: number;
+  manual: number;
+}
+
 export interface UpstreamAccountPage {
   items: UpstreamAccount[];
   total: number;
   limit: number;
   offset: number;
+  metrics?: UpstreamAccountMetrics;
 }
 
 export interface UpstreamAccountInput {

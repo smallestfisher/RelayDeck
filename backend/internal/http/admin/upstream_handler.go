@@ -96,6 +96,7 @@ func (h *Handler) mountUpstreamRoutes(mux *http.ServeMux) {
 	mux.Handle("POST /api/admin/upstreams/accounts/batch/refresh-quota", h.requireAdmin(http.HandlerFunc(h.handleBatchUpstreamAction)))
 	mux.Handle("POST /api/admin/upstreams/accounts/batch/checkin", h.requireAdmin(http.HandlerFunc(h.handleBatchUpstreamAction)))
 	mux.Handle("POST /api/admin/upstreams/accounts/batch/refresh-all", h.requireAdmin(http.HandlerFunc(h.handleBatchUpstreamAction)))
+	mux.Handle("POST /api/admin/upstreams/accounts/batch/delete", h.requireAdmin(http.HandlerFunc(h.handleBatchDeleteUpstreamAccounts)))
 }
 
 func (h *Handler) requireAdmin(next http.Handler) http.Handler {
@@ -116,18 +117,19 @@ func (h *Handler) handleUpstreamAccounts(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
-	pagination := parseUpstreamAccountPagination(r)
-	accounts, total := listUpstreamAccounts(upstreams, pagination.Limit, pagination.Offset)
+	filter := parseUpstreamAccountFilter(r)
+	accounts, metrics := h.listFilteredUpstreamAccounts(upstreams, filter)
 	items := make([]upstreamAccountResponse, 0, len(accounts))
 	for _, account := range accounts {
 		status, _ := upstreams.UpstreamAccountStatus(account.ID)
 		items = append(items, toUpstreamAccountResponse(account, status))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"items":  items,
-		"total":  total,
-		"limit":  pagination.Limit,
-		"offset": pagination.Offset,
+		"items":   items,
+		"total":   metrics.Total,
+		"limit":   filter.Limit,
+		"offset":  filter.Offset,
+		"metrics": metrics,
 	})
 }
 
@@ -217,6 +219,31 @@ func (h *Handler) handleDeleteUpstreamAccount(w http.ResponseWriter, r *http.Req
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) handleBatchDeleteUpstreamAccounts(w http.ResponseWriter, r *http.Request) {
+	upstreams, ok := h.upstreamStore(w)
+	if !ok {
+		return
+	}
+	var payload batchRequest
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_json"})
+		return
+	}
+	results := make([]actionResult, 0, len(payload.IDs))
+	for _, id := range payload.IDs {
+		if _, found := upstreams.UpstreamAccount(id); !found {
+			results = append(results, actionResult{ID: id, Status: "not_found", Message: "account not found"})
+			continue
+		}
+		if err := upstreams.DeleteUpstreamAccount(id); err != nil {
+			results = append(results, actionResult{ID: id, Status: "failed", Message: "delete_failed"})
+			continue
+		}
+		results = append(results, actionResult{ID: id, Status: "success"})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"results": results})
 }
 
 func (h *Handler) handleDraftUpstreamAPITest(w http.ResponseWriter, r *http.Request) {
@@ -601,13 +628,8 @@ func validateDraftUpstreamAPITestRequest(payload upstreamAccountRequest) error {
 	return nil
 }
 
-type upstreamAccountPagination struct {
-	Limit  int
-	Offset int
-}
-
-type upstreamAccountPager interface {
-	ListUpstreamAccountsPage(limit int, offset int) ([]domain.UpstreamAccount, int)
+type upstreamAccountFilterer interface {
+	FilterUpstreamAccounts(filter store.UpstreamAccountFilter) ([]domain.UpstreamAccount, store.UpstreamAccountMetrics)
 }
 
 const (
@@ -615,9 +637,10 @@ const (
 	maxUpstreamAccountLimit     = 200
 )
 
-func parseUpstreamAccountPagination(r *http.Request) upstreamAccountPagination {
+func parseUpstreamAccountFilter(r *http.Request) store.UpstreamAccountFilter {
+	query := r.URL.Query()
 	limit := defaultUpstreamAccountLimit
-	if raw := r.URL.Query().Get("limit"); raw != "" {
+	if raw := query.Get("limit"); raw != "" {
 		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
 			limit = parsed
 		}
@@ -626,28 +649,145 @@ func parseUpstreamAccountPagination(r *http.Request) upstreamAccountPagination {
 		limit = maxUpstreamAccountLimit
 	}
 	offset := 0
-	if raw := r.URL.Query().Get("offset"); raw != "" {
+	if raw := query.Get("offset"); raw != "" {
 		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
 			offset = parsed
 		}
 	}
-	return upstreamAccountPagination{Limit: limit, Offset: offset}
+	return store.UpstreamAccountFilter{
+		Query:         strings.TrimSpace(query.Get("q")),
+		PlatformKind:  normalizeFilterValue(query.Get("platform_kind")),
+		APIStatus:     normalizeFilterValue(query.Get("api_status")),
+		AccountStatus: normalizeFilterValue(query.Get("account_status")),
+		LatencyBand:   normalizeFilterValue(query.Get("latency_band")),
+		Limit:         limit,
+		Offset:        offset,
+	}
 }
 
-func listUpstreamAccounts(upstreams store.UpstreamAccountStore, limit int, offset int) ([]domain.UpstreamAccount, int) {
-	if pager, ok := upstreams.(upstreamAccountPager); ok {
-		return pager.ListUpstreamAccountsPage(limit, offset)
+// normalizeFilterValue treats the sentinel "all" and empty string the same way:
+// no constraint on that dimension.
+func normalizeFilterValue(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "all" {
+		return ""
 	}
-	accounts := upstreams.ListUpstreamAccounts()
+	return value
+}
+
+// listFilteredUpstreamAccounts prefers a store that can filter and aggregate in
+// the database. When the store does not implement that (the in-memory fake used
+// in tests), it falls back to filtering in Go so behavior stays identical.
+func (h *Handler) listFilteredUpstreamAccounts(upstreams store.UpstreamAccountStore, filter store.UpstreamAccountFilter) ([]domain.UpstreamAccount, store.UpstreamAccountMetrics) {
+	if filterer, ok := upstreams.(upstreamAccountFilterer); ok {
+		return filterer.FilterUpstreamAccounts(filter)
+	}
+	return h.filterUpstreamAccountsInMemory(upstreams, filter)
+}
+
+func (h *Handler) filterUpstreamAccountsInMemory(upstreams store.UpstreamAccountStore, filter store.UpstreamAccountFilter) ([]domain.UpstreamAccount, store.UpstreamAccountMetrics) {
+	all := upstreams.ListUpstreamAccounts()
+	matched := make([]domain.UpstreamAccount, 0, len(all))
+	statusByID := make(map[string]domain.UpstreamAccountStatus, len(all))
+	var metrics store.UpstreamAccountMetrics
+	for _, account := range all {
+		status, ok := upstreams.UpstreamAccountStatus(account.ID)
+		if !ok || status.APIStatus == "" {
+			status = defaultStatusForAccount(account)
+		}
+		statusByID[account.ID] = status
+		if !accountMatchesFilter(account, status, filter) {
+			continue
+		}
+		matched = append(matched, account)
+		accumulateMetrics(&metrics, account, status)
+	}
+	metrics.Total = len(matched)
+	return paginateAccounts(matched, filter.Limit, filter.Offset), metrics
+}
+
+func accountMatchesFilter(account domain.UpstreamAccount, status domain.UpstreamAccountStatus, filter store.UpstreamAccountFilter) bool {
+	if keyword := strings.ToLower(filter.Query); keyword != "" {
+		if !strings.Contains(strings.ToLower(account.Name), keyword) &&
+			!strings.Contains(strings.ToLower(account.BaseURL), keyword) &&
+			!strings.Contains(strings.ToLower(account.Note), keyword) {
+			return false
+		}
+	}
+	if filter.PlatformKind != "" && string(account.PlatformKind) != filter.PlatformKind {
+		return false
+	}
+	if filter.APIStatus != "" {
+		effective := string(status.APIStatus)
+		if !account.Enabled {
+			effective = string(domain.UpstreamAPIStatusDisabled)
+		}
+		if effective != filter.APIStatus {
+			return false
+		}
+	}
+	if filter.AccountStatus != "" && string(status.AccountStatus) != filter.AccountStatus {
+		return false
+	}
+	if filter.LatencyBand != "" && !latencyBandMatches(status, filter.LatencyBand) {
+		return false
+	}
+	return true
+}
+
+// latencyBandMatches uses the effective latency the table displays: API check
+// latency when present, otherwise the model-sync latency.
+func latencyBandMatches(status domain.UpstreamAccountStatus, band string) bool {
+	latency := effectiveLatencyMS(status)
+	switch band {
+	case "unknown":
+		return latency <= 0
+	case "low":
+		return latency > 0 && latency < 300
+	case "medium":
+		return latency >= 300 && latency <= 1000
+	case "high":
+		return latency > 1000
+	default:
+		return true
+	}
+}
+
+func effectiveLatencyMS(status domain.UpstreamAccountStatus) int {
+	if !status.LastAPICheckedAt.IsZero() {
+		return status.APILatencyMS
+	}
+	if !status.LastModelSyncedAt.IsZero() {
+		return status.LatencyMS
+	}
+	return 0
+}
+
+// accumulateMetrics applies the same classification the dashboard cards show.
+// "manual" counts only action_required, matching the freshly-created
+// not_configured accounts no longer being flagged as pending.
+func accumulateMetrics(metrics *store.UpstreamAccountMetrics, account domain.UpstreamAccount, status domain.UpstreamAccountStatus) {
+	if account.Enabled && status.APIStatus == domain.UpstreamAPIStatusHealthy {
+		metrics.Healthy++
+	}
+	if status.APIStatus == domain.UpstreamAPIStatusWarning || status.AccountStatus == domain.AccountCredentialStatusExpired {
+		metrics.Warning++
+	}
+	if status.AccountStatus == domain.AccountCredentialStatusActionRequired {
+		metrics.Manual++
+	}
+}
+
+func paginateAccounts(accounts []domain.UpstreamAccount, limit int, offset int) []domain.UpstreamAccount {
 	total := len(accounts)
 	if offset >= total {
-		return []domain.UpstreamAccount{}, total
+		return []domain.UpstreamAccount{}
 	}
 	end := offset + limit
 	if end > total {
 		end = total
 	}
-	return accounts[offset:end], total
+	return accounts[offset:end]
 }
 
 func toUpstreamAccountResponse(account domain.UpstreamAccount, status domain.UpstreamAccountStatus) upstreamAccountResponse {
@@ -682,10 +822,17 @@ func defaultStatusForAccount(account domain.UpstreamAccount) domain.UpstreamAcco
 	if !account.Enabled {
 		apiStatus = domain.UpstreamAPIStatusDisabled
 	}
+	// A freshly created or never-checked account has no credential test result yet.
+	// Only mark it as needing manual action when a credential is actually configured
+	// but still unverified; otherwise it is simply not configured.
+	accountStatus := domain.AccountCredentialStatusNotConfigured
+	if account.HasAccountCredential() {
+		accountStatus = domain.AccountCredentialStatusActionRequired
+	}
 	return domain.UpstreamAccountStatus{
 		UpstreamAccountID: account.ID,
 		APIStatus:         apiStatus,
-		AccountStatus:     domain.AccountCredentialStatusActionRequired,
+		AccountStatus:     accountStatus,
 		CheckinStatus:     domain.CheckinStatusUnsupported,
 	}
 }

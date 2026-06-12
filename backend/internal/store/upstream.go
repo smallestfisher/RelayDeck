@@ -8,6 +8,27 @@ import (
 
 var ErrNotFound = errors.New("not found")
 
+// UpstreamAccountFilter describes server-side filtering and pagination for the
+// account list. Empty string fields mean "no constraint" for that dimension.
+type UpstreamAccountFilter struct {
+	Query         string
+	PlatformKind  string
+	APIStatus     string
+	AccountStatus string
+	LatencyBand   string // "", "low", "medium", "high", "unknown"
+	Limit         int
+	Offset        int
+}
+
+// UpstreamAccountMetrics aggregates account counts across the whole filtered
+// set, independent of pagination. Total matches the filtered row count.
+type UpstreamAccountMetrics struct {
+	Total   int `json:"total"`
+	Healthy int `json:"healthy"`
+	Warning int `json:"warning"`
+	Manual  int `json:"manual"`
+}
+
 type UpstreamAccountStore interface {
 	ListUpstreamAccounts() []domain.UpstreamAccount
 	UpstreamAccount(id string) (domain.UpstreamAccount, bool)
