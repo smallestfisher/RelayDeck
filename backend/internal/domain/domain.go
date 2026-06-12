@@ -335,3 +335,13 @@ type CheckinResult struct {
 	ActionRequiredReason string
 	CredentialUpdate     *UpstreamCredentialUpdate
 }
+
+type UpstreamTestCallResult struct {
+	HTTPStatus       int                `json:"http_status"`
+	Protocol         string             `json:"protocol"`
+	OK               bool               `json:"ok"`
+	ErrorClass       UpstreamErrorClass `json:"error_class,omitempty"`
+	ErrorMessage     string             `json:"error_message,omitempty"`
+	LatencyMS        int                `json:"latency_ms"`
+	UpstreamResponse map[string]any     `json:"-"`
+}

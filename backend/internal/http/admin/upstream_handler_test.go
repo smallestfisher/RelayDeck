@@ -34,7 +34,6 @@ func TestCreateListAndUpdateUpstreamAccountRedactsSecrets(t *testing.T) {
 
 	createReq := httptest.NewRequest(http.MethodPost, "/api/admin/upstreams/accounts", strings.NewReader(`{
 		"name":"New API Main",
-		"code":"newapi-main",
 		"platform_kind":"new_api",
 		"base_url":"https://new-api.example.com",
 		"enabled":true,
@@ -71,6 +70,9 @@ func TestCreateListAndUpdateUpstreamAccountRedactsSecrets(t *testing.T) {
 	}
 	if stored.APIKeyPrefix != "sk-test" {
 		t.Fatalf("expected api key prefix, got %q", stored.APIKeyPrefix)
+	}
+	if stored.Code == "" {
+		t.Fatal("expected generated internal site code")
 	}
 	var created struct {
 		Status domain.UpstreamAccountStatus `json:"status"`
@@ -222,6 +224,40 @@ func TestUpstreamActionEndpointsUpdateStatusModelsAndEvents(t *testing.T) {
 	events := adminStore.upstreams.UpstreamAccountEvents(account.ID, 10)
 	if len(events) != 1 || events[0].Operation != "sync_models" || events[0].Status != "success" {
 		t.Fatalf("expected sync event, got %+v", events)
+	}
+}
+
+func TestTestCallUpdatesAPIStatus(t *testing.T) {
+	handler, sessions, adminStore, fakeStore := newUpstreamTestHandlerParts(t)
+	cookie := createTestSession(t, sessions, adminStore)
+	account := createStoredUpstreamAccount(t, fakeStore)
+	if err := fakeStore.ReplaceUpstreamModels(account.ID, []domain.UpstreamSyncedModel{{
+		NormalizedModelName:    "gpt-4o-mini",
+		UpstreamModelName:      "gpt-4o-mini",
+		NativeWireProtocol:     domain.ProtocolOpenAIChat,
+		SupportedWireProtocols: []domain.Protocol{domain.ProtocolOpenAIChat, domain.ProtocolOpenAIResponses},
+	}}); err != nil {
+		t.Fatalf("seed models: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/upstreams/accounts/"+account.ID+"/test-call", strings.NewReader(`{"model_name":"gpt-4o-mini","protocol":"auto","message":"hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected test call 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var response testCallResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !response.OK || response.Protocol != "openai-chat" || response.HTTPStatus != http.StatusOK {
+		t.Fatalf("unexpected test response: %+v", response)
+	}
+	status, ok := fakeStore.UpstreamAccountStatus(account.ID)
+	if !ok || status.APIStatus != domain.UpstreamAPIStatusHealthy || status.LastAPICheckedAt.IsZero() {
+		t.Fatalf("expected healthy API status, got %+v", status)
 	}
 }
 
@@ -547,8 +583,8 @@ func (fakeAccountAdapter) Checkin(context.Context, domain.UpstreamAccount, strin
 	return domain.CheckinResult{Status: domain.CheckinStatusUnsupported}, nil
 }
 
-func (fakeAccountAdapter) TestCall(context.Context, domain.UpstreamAccount, string, string, string, bool, string) (map[string]any, error) {
-	return map[string]any{"ok": true}, nil
+func (fakeAccountAdapter) TestCall(context.Context, domain.UpstreamAccount, string, string, string, bool, string) (domain.UpstreamTestCallResult, error) {
+	return domain.UpstreamTestCallResult{HTTPStatus: http.StatusOK, Protocol: "openai-chat", OK: true, LatencyMS: 42}, nil
 }
 
 type rotatingAccountAdapter struct {

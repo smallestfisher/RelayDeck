@@ -66,7 +66,7 @@ export function SiteTable({
               </td>
               <td className={tableCellClass}>
                 <div className="flex items-center gap-3">
-                  <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-xs font-semibold text-white">{account.code.slice(0, 3).toUpperCase()}</span>
+                  <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-xs font-semibold text-white">{avatarText(account.name)}</span>
                   <div>
                     <div className="font-medium text-text">{account.name}</div>
                     <div className="max-w-[280px] truncate text-xs text-muted">{account.baseUrl}</div>
@@ -135,6 +135,12 @@ function formatModelCount(modelCount: number, lastModelSyncedAt?: string): strin
 
 function formatStatusLatency(latencyMs: number, lastApiCheckedAt?: string): string {
   return lastApiCheckedAt ? formatLatency(latencyMs) : '-';
+}
+
+function avatarText(name: string): string {
+  const trimmed = name.trim();
+  if (!trimmed) return '站';
+  return trimmed.slice(0, 2).toUpperCase();
 }
 
 function IconButton({

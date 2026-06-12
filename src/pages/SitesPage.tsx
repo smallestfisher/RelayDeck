@@ -80,7 +80,6 @@ export function SitesPage() {
       const matchesQuery =
         !keyword ||
         account.name.toLowerCase().includes(keyword) ||
-        account.code.toLowerCase().includes(keyword) ||
         account.baseUrl.toLowerCase().includes(keyword) ||
         account.note.toLowerCase().includes(keyword);
       const matchesPlatform = platform === 'all' || account.platformKind === platform;
@@ -248,6 +247,11 @@ export function SitesPage() {
     );
   }
 
+  function applyStatusUpdate(accountId: string, status?: UpstreamAccount['status']) {
+    setAccounts((current) => applyStatusUpdateToAccounts(current, accountId, status));
+    setTestCallAccount((current) => (current && current.id === accountId && status ? { ...current, status } : current));
+  }
+
   function openCreateDrawer() {
     setEditingAccount(null);
     setDrawerError('');
@@ -286,7 +290,7 @@ export function SitesPage() {
 
       <Card>
         <div className="mb-4 flex flex-wrap items-center gap-3">
-          <SearchInput className="w-[270px]" placeholder="搜索站点、代码、URL 或备注" value={query} onChange={(event) => setQuery(event.target.value)} />
+          <SearchInput className="w-[270px]" placeholder="搜索站点、URL 或备注" value={query} onChange={(event) => setQuery(event.target.value)} />
           <SelectControl
             className="w-36"
             options={[{ label: '平台：全部', value: 'all' }, ...platformOptions]}
@@ -458,7 +462,7 @@ export function SitesPage() {
         </div>
       </Drawer>
 
-      {testCallAccount && <TestCallModal account={testCallAccount} onClose={() => setTestCallAccount(null)} />}
+      {testCallAccount && <TestCallModal account={testCallAccount} onClose={() => setTestCallAccount(null)} onStatusUpdate={applyStatusUpdate} />}
     </div>
   );
 }
@@ -478,6 +482,11 @@ function formatDetailLatency(latencyMs: number, lastApiCheckedAt?: string): stri
 
 function formatDetailModelCount(modelCount: number, lastModelSyncedAt?: string): string {
   return lastModelSyncedAt ? formatNumber(modelCount) : '-';
+}
+
+function applyStatusUpdateToAccounts(accounts: UpstreamAccount[], accountId: string, status?: UpstreamAccount['status']): UpstreamAccount[] {
+  if (!status) return accounts;
+  return accounts.map((account) => (account.id === accountId ? { ...account, status } : account));
 }
 
 function operationText(operation: string): string {
@@ -525,7 +534,6 @@ function batchSummary(results: UpstreamActionResult[]): string {
 
 function validateAccountInput(input: UpstreamAccountInput, editingAccount: UpstreamAccount | null): string {
   if (!input.name.trim()) return '请填写站点名称';
-  if (!input.code.trim()) return '请填写站点代码';
   if (!input.baseUrl.trim()) return '请填写 Base URL';
   if (!editingAccount && !input.apiKey?.trim()) return '请填写 API Key';
   const credential = input.accountCredential?.trim() ?? '';

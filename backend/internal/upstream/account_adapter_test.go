@@ -14,6 +14,10 @@ import (
 
 func TestNewAPIAdapterSyncModelsUsesAPIKeyModelList(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/pricing" {
+			http.NotFound(w, r)
+			return
+		}
 		if r.URL.Path != "/v1/models" {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
@@ -39,6 +43,39 @@ func TestNewAPIAdapterSyncModelsUsesAPIKeyModelList(t *testing.T) {
 	}
 	if len(result.Models) != 2 || result.Models[0].NormalizedModelName != "gpt-4o-mini" {
 		t.Fatalf("unexpected models: %+v", result.Models)
+	}
+}
+
+func TestNewAPIAdapterSyncModelsUsesPricingEndpointTypes(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/models":
+			writeTestJSON(t, w, map[string]any{"data": []map[string]any{{"id": "claude-sonnet-custom"}}})
+		case "/api/pricing":
+			writeTestJSON(t, w, map[string]any{
+				"success": true,
+				"data": []map[string]any{{
+					"model_name":               "claude-sonnet-custom",
+					"supported_endpoint_types": []string{"openai", "anthropic"},
+				}},
+			})
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	adapter := NewNewAPIAccountAdapter(server.Client(), time.Second)
+	result, _, err := adapter.SyncModels(context.Background(), accountForAdapter(server.URL, domain.PlatformKindNewAPI), "sk-test")
+	if err != nil {
+		t.Fatalf("sync models: %v", err)
+	}
+	if len(result.Models) != 1 {
+		t.Fatalf("unexpected models: %+v", result.Models)
+	}
+	protocols := result.Models[0].SupportedWireProtocols
+	if len(protocols) != 2 || protocols[0] != domain.ProtocolOpenAIChat || protocols[1] != domain.ProtocolAnthropicMessages {
+		t.Fatalf("expected pricing endpoint protocols, got %+v", protocols)
 	}
 }
 
@@ -92,6 +129,35 @@ func TestNewAPIAdapterAccountCredentialUsesAccessTokenUserHeaders(t *testing.T) 
 	}
 	if result.Status.AccountStatus != domain.AccountCredentialStatusValid {
 		t.Fatalf("unexpected account status: %+v", result.Status)
+	}
+}
+
+func TestNewAPIAdapterTestCallUsesRequestedProtocolEndpoint(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/messages" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if r.Header.Get("Authorization") != "Bearer sk-test" {
+			t.Fatalf("unexpected authorization: %q", r.Header.Get("Authorization"))
+		}
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if payload["model"] != "claude-3-5-sonnet" || payload["max_tokens"] == nil {
+			t.Fatalf("unexpected payload: %+v", payload)
+		}
+		writeTestJSON(t, w, map[string]any{"id": "msg_1"})
+	}))
+	defer server.Close()
+
+	adapter := NewNewAPIAccountAdapter(server.Client(), time.Second)
+	result, err := adapter.TestCall(context.Background(), accountForAdapter(server.URL, domain.PlatformKindNewAPI), "sk-test", "claude-3-5-sonnet", "claude-messages", false, "hello")
+	if err != nil {
+		t.Fatalf("test call: %v", err)
+	}
+	if !result.OK || result.HTTPStatus != http.StatusOK || result.Protocol != "claude-messages" {
+		t.Fatalf("unexpected test result: %+v", result)
 	}
 }
 

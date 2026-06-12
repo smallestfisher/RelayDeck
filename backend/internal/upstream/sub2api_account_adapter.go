@@ -295,6 +295,56 @@ func sub2APIPlatformQuotaAmount(body []byte) float64 {
 	return 0
 }
 
-func (a *Sub2APIAccountAdapter) TestCall(ctx context.Context, account domain.UpstreamAccount, apiKey string, modelName string, protocol string, streaming bool, message string) (map[string]any, error) {
-	return nil, errors.New("test call not supported for sub2api")
+func (a *Sub2APIAccountAdapter) TestCall(ctx context.Context, account domain.UpstreamAccount, apiKey string, modelName string, protocol string, streaming bool, message string) (domain.UpstreamTestCallResult, error) {
+	start := time.Now()
+	var path string
+	var reqBody map[string]any
+
+	switch protocol {
+	case "openai-chat":
+		path = "/v1/chat/completions"
+		reqBody = map[string]any{
+			"model":    modelName,
+			"messages": []map[string]string{{"role": "user", "content": message}},
+			"stream":   streaming,
+		}
+	case "claude-messages":
+		path = "/v1/messages"
+		reqBody = map[string]any{
+			"model":      modelName,
+			"messages":   []map[string]string{{"role": "user", "content": message}},
+			"max_tokens": 1024,
+			"stream":     streaming,
+		}
+	case "openai-responses":
+		path = "/v1/responses"
+		reqBody = map[string]any{
+			"model":  modelName,
+			"input":  message,
+			"stream": streaming,
+		}
+	default:
+		return domain.UpstreamTestCallResult{}, errors.New("unsupported protocol: " + protocol)
+	}
+
+	bodyBytes, err := json.Marshal(reqBody)
+	if err != nil {
+		return domain.UpstreamTestCallResult{}, err
+	}
+	resp, err := a.do(ctx, http.MethodPost, account, path, authBearer(apiKey), bytes.NewReader(bodyBytes))
+	if err != nil {
+		return domain.UpstreamTestCallResult{}, err
+	}
+	testResult := domain.UpstreamTestCallResult{HTTPStatus: resp.statusCode, Protocol: protocol, OK: resp.statusCode >= 200 && resp.statusCode < 300, LatencyMS: latencyMS(start)}
+	if resp.statusCode < 200 || resp.statusCode >= 300 {
+		errorClass, message := classifyStatus(resp.statusCode, resp.body)
+		testResult.ErrorClass = errorClass
+		testResult.ErrorMessage = message
+		return testResult, nil
+	}
+	var upstreamResponse map[string]any
+	if err := json.Unmarshal(resp.body, &upstreamResponse); err == nil {
+		testResult.UpstreamResponse = upstreamResponse
+	}
+	return testResult, nil
 }

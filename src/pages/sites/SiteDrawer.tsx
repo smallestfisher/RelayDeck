@@ -121,14 +121,9 @@ export function SiteDrawer({ open, variant = 'drawer', account, saving, error, o
       <div className="space-y-5">
         {error && <div className="rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">{error}</div>}
 
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Field label="站点名称 *">
-            <input value={form.name} onChange={(event) => patch('name', event.target.value)} className={inputClass} placeholder="New API 主账号" />
-          </Field>
-          <Field label="站点代码 *">
-            <input value={form.code} onChange={(event) => patch('code', event.target.value)} className={inputClass} placeholder="newapi-main" />
-          </Field>
-        </div>
+        <Field label="站点名称 *">
+          <input value={form.name} onChange={(event) => patch('name', event.target.value)} className={inputClass} placeholder="New API 主账号" />
+        </Field>
 
         <Field label="平台 *">
           <SelectControl

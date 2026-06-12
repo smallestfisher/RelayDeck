@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/smallestfisher/relaydeck/backend/internal/domain"
 	"github.com/smallestfisher/relaydeck/backend/internal/http/middleware"
@@ -60,6 +61,17 @@ type actionResult struct {
 	ID            string                        `json:"id"`
 	Status        string                        `json:"status"`
 	Message       string                        `json:"message,omitempty"`
+	AccountStatus *domain.UpstreamAccountStatus `json:"account_status,omitempty"`
+}
+
+type testCallResponse struct {
+	ID            string                        `json:"id"`
+	HTTPStatus    int                           `json:"http_status"`
+	Protocol      string                        `json:"protocol"`
+	OK            bool                          `json:"ok"`
+	Message       string                        `json:"message,omitempty"`
+	ErrorClass    domain.UpstreamErrorClass     `json:"error_class,omitempty"`
+	LatencyMS     int                           `json:"latency_ms"`
 	AccountStatus *domain.UpstreamAccountStatus `json:"account_status,omitempty"`
 }
 
@@ -490,7 +502,11 @@ func mergeActionStatus(action string, existing domain.UpstreamAccountStatus, sta
 func (h *Handler) accountFromRequest(payload upstreamAccountRequest, existing domain.UpstreamAccount, create bool) (domain.UpstreamAccount, error) {
 	account := existing
 	account.Name = strings.TrimSpace(payload.Name)
-	account.Code = strings.TrimSpace(payload.Code)
+	if create {
+		account.Code = internalSiteCode(payload)
+	} else if code := strings.TrimSpace(payload.Code); code != "" {
+		account.Code = code
+	}
 	account.PlatformKind = payload.PlatformKind
 	account.BaseURL = strings.TrimRight(strings.TrimSpace(payload.BaseURL), "/")
 	account.Enabled = payload.Enabled
@@ -557,9 +573,6 @@ func (h *Handler) decryptAccountSecrets(account domain.UpstreamAccount) (string,
 func validateUpstreamAccountRequest(payload upstreamAccountRequest, create bool) error {
 	if strings.TrimSpace(payload.Name) == "" {
 		return errors.New("name_required")
-	}
-	if strings.TrimSpace(payload.Code) == "" {
-		return errors.New("code_required")
 	}
 	if payload.PlatformKind != domain.PlatformKindNewAPI && payload.PlatformKind != domain.PlatformKindSub2API {
 		return errors.New("platform_kind_invalid")
@@ -682,6 +695,35 @@ func credentialKindOrNone(kind domain.UpstreamCredentialKind) domain.UpstreamCre
 	return kind
 }
 
+func internalSiteCode(payload upstreamAccountRequest) string {
+	base := slugPart(payload.Name)
+	if base == "" {
+		base = slugPart(string(payload.PlatformKind))
+	}
+	if base == "" {
+		base = "site"
+	}
+	return base + "-" + strconv.FormatInt(time.Now().UnixNano()%1000000, 36)
+}
+
+func slugPart(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	var builder strings.Builder
+	lastDash := false
+	for _, char := range value {
+		if (char >= 'a' && char <= 'z') || (char >= '0' && char <= '9') {
+			builder.WriteRune(char)
+			lastDash = false
+			continue
+		}
+		if !lastDash && builder.Len() > 0 {
+			builder.WriteByte('-')
+			lastDash = true
+		}
+	}
+	return strings.Trim(builder.String(), "-")
+}
+
 func actionFromPath(path string) string {
 	parts := strings.Split(strings.Trim(path, "/"), "/")
 	if len(parts) == 0 {
@@ -714,6 +756,62 @@ func firstError(values ...error) error {
 		}
 	}
 	return nil
+}
+
+func resolveTestCallProtocol(upstreams store.UpstreamAccountStore, accountID string, modelName string, requested string) (string, error) {
+	modelName = strings.TrimSpace(modelName)
+	if modelName == "" {
+		return "", errors.New("model_name_required")
+	}
+	requested = strings.TrimSpace(requested)
+	if requested == "" || requested == "auto" {
+		requested = "auto"
+	}
+	protocols := supportedTestProtocolsForModel(upstreams.UpstreamModels(accountID), modelName)
+	if len(protocols) == 0 {
+		return "", errors.New("model_protocols_missing")
+	}
+	if requested == "auto" {
+		return protocols[0], nil
+	}
+	for _, protocol := range protocols {
+		if protocol == requested {
+			return requested, nil
+		}
+	}
+	return "", errors.New("protocol_not_supported_by_model")
+}
+
+func supportedTestProtocolsForModel(models []domain.UpstreamSyncedModel, modelName string) []string {
+	seen := map[string]bool{}
+	protocols := []string{}
+	for _, model := range models {
+		if model.UpstreamModelName != modelName && model.NormalizedModelName != modelName {
+			continue
+		}
+		for _, protocol := range model.SupportedWireProtocols {
+			if mapped := testProtocolForWireProtocol(protocol); mapped != "" && !seen[mapped] {
+				seen[mapped] = true
+				protocols = append(protocols, mapped)
+			}
+		}
+		if len(protocols) == 0 {
+			if mapped := testProtocolForWireProtocol(model.NativeWireProtocol); mapped != "" {
+				protocols = append(protocols, mapped)
+			}
+		}
+		break
+	}
+	return protocols
+}
+
+func testProtocolForWireProtocol(protocol domain.Protocol) string {
+	caseMap := map[domain.Protocol]string{
+		domain.ProtocolOpenAIChat:        "openai-chat",
+		domain.ProtocolOpenAIResponses:   "openai-responses",
+		domain.ProtocolAnthropicMessages: "claude-messages",
+	}
+	return caseMap[protocol]
 }
 
 type testCallRequest struct {
@@ -754,10 +852,52 @@ func (h *Handler) handleTestCall(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := adapter.TestCall(r.Context(), account, apiKey, req.ModelName, req.Protocol, req.Streaming, req.Message)
+	protocol, err := resolveTestCallProtocol(upstreams, account.ID, req.ModelName, req.Protocol)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, result)
+	result, err := adapter.TestCall(r.Context(), account, apiKey, req.ModelName, protocol, req.Streaming, req.Message)
+	if err != nil {
+		status := h.statusFromTestCallResult(account.ID, domain.UpstreamTestCallResult{Protocol: protocol, OK: false, ErrorClass: domain.UpstreamErrorUnknown, ErrorMessage: err.Error()})
+		stored := h.storeActionStatus(upstreams, account, "test-api", status, nil, err)
+		response := testCallResponse{ID: account.ID, Protocol: protocol, OK: false, Message: err.Error(), ErrorClass: domain.UpstreamErrorUnknown, AccountStatus: stored.AccountStatus}
+		writeJSON(w, http.StatusOK, response)
+		return
+	}
+	message := result.ErrorMessage
+	if result.OK && message == "" {
+		message = "HTTP 请求成功"
+	}
+	status := h.statusFromTestCallResult(account.ID, result)
+	var resultErr error
+	if !result.OK {
+		resultErr = errors.New(firstNonEmpty(message, "test call failed"))
+	}
+	stored := h.storeActionStatus(upstreams, account, "test-api", status, nil, resultErr)
+	writeJSON(w, http.StatusOK, testCallResponse{
+		ID:            account.ID,
+		HTTPStatus:    result.HTTPStatus,
+		Protocol:      result.Protocol,
+		OK:            result.OK,
+		Message:       message,
+		ErrorClass:    result.ErrorClass,
+		LatencyMS:     result.LatencyMS,
+		AccountStatus: stored.AccountStatus,
+	})
+}
+
+func (h *Handler) statusFromTestCallResult(accountID string, result domain.UpstreamTestCallResult) domain.UpstreamAccountStatus {
+	status := domain.UpstreamAccountStatus{UpstreamAccountID: accountID, LastAPICheckedAt: h.now(), UpdatedAt: h.now(), LatencyMS: result.LatencyMS}
+	if result.OK {
+		status.APIStatus = domain.UpstreamAPIStatusHealthy
+		return status
+	}
+	status.APIStatus = domain.UpstreamAPIStatusFailed
+	status.LastErrorClass = result.ErrorClass
+	if status.LastErrorClass == "" {
+		status.LastErrorClass = domain.UpstreamErrorUnknown
+	}
+	status.LastErrorMessage = firstNonEmpty(result.ErrorMessage, "test call failed")
+	return status
 }

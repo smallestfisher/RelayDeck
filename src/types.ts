@@ -169,6 +169,17 @@ export interface UpstreamActionResult {
   accountStatus?: UpstreamAccountStatusSnapshot;
 }
 
+export interface UpstreamTestCallResult {
+  id: string;
+  httpStatus: number;
+  protocol: string;
+  ok: boolean;
+  message?: string;
+  errorClass?: string;
+  latencyMs: number;
+  accountStatus?: UpstreamAccountStatusSnapshot;
+}
+
 export interface ModelInfo {
   id: string;
   name: string;

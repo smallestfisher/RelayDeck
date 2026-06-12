@@ -12,6 +12,7 @@ import type {
   UpstreamCredentialKind,
   UpstreamModel,
   UpstreamPlatformKind,
+  UpstreamTestCallResult,
 } from '../types';
 
 async function requestJSON<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -106,6 +107,19 @@ export const adminApi = {
   async listUpstreamEvents(id: string): Promise<UpstreamAccountEvent[]> {
     const payload = await requestJSON<{ items: RawUpstreamAccountEvent[] }>(`/api/admin/upstreams/accounts/${id}/events`);
     return payload.items.map(mapUpstreamEvent);
+  },
+
+  async testUpstreamCall(id: string, input: { modelName: string; protocol: string; streaming: boolean; message: string }): Promise<UpstreamTestCallResult> {
+    const payload = await requestJSON<RawUpstreamTestCallResult>(`/api/admin/upstreams/accounts/${id}/test-call`, {
+      method: 'POST',
+      body: JSON.stringify({
+        model_name: input.modelName,
+        protocol: input.protocol,
+        streaming: input.streaming,
+        message: input.message,
+      }),
+    });
+    return mapUpstreamTestCallResult(payload);
   },
 };
 
@@ -219,6 +233,17 @@ interface RawUpstreamActionResult {
   account_status?: RawUpstreamStatus;
 }
 
+interface RawUpstreamTestCallResult {
+  id: string;
+  http_status?: number;
+  protocol?: string;
+  ok?: boolean;
+  message?: string;
+  error_class?: string;
+  latency_ms?: number;
+  account_status?: RawUpstreamStatus;
+}
+
 function toRawUpstreamAccountInput(input: UpstreamAccountInput) {
   return {
     name: input.name,
@@ -243,6 +268,19 @@ function mapUpstreamActionResult(raw: RawUpstreamActionResult): UpstreamActionRe
     id: raw.id,
     status: raw.status,
     message: raw.message,
+    accountStatus: raw.account_status ? mapUpstreamStatus(raw.account_status) : undefined,
+  };
+}
+
+function mapUpstreamTestCallResult(raw: RawUpstreamTestCallResult): UpstreamTestCallResult {
+  return {
+    id: raw.id,
+    httpStatus: raw.http_status ?? 0,
+    protocol: raw.protocol ?? '',
+    ok: Boolean(raw.ok),
+    message: raw.message,
+    errorClass: raw.error_class,
+    latencyMs: raw.latency_ms ?? 0,
     accountStatus: raw.account_status ? mapUpstreamStatus(raw.account_status) : undefined,
   };
 }

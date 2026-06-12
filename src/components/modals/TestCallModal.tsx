@@ -1,26 +1,40 @@
 import { RotateCcw, Send, X } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { adminApi } from '../../lib/adminApi';
-import type { UpstreamAccount, UpstreamModel } from '../../types';
+import { formatLatency } from '../../lib/format';
+import type { UpstreamAccount, UpstreamModel, UpstreamTestCallResult } from '../../types';
 
 interface TestCallModalProps {
   account: UpstreamAccount;
   onClose: () => void;
+  onStatusUpdate?: (accountId: string, status: UpstreamTestCallResult['accountStatus']) => void;
 }
 
 const DEFAULT_MESSAGE = 'Hello, how are you?';
 const inputClass =
   'w-full rounded-lg border border-line bg-elevated px-3 py-2 text-sm text-text outline-none focus:border-primary focus:ring-2 focus:ring-primary/20';
 
-export function TestCallModal({ account, onClose }: TestCallModalProps) {
+const protocolLabels: Record<string, string> = {
+  'openai-chat': 'OpenAI Chat',
+  'openai-responses': 'OpenAI Responses',
+  'claude-messages': 'Claude Messages',
+};
+
+const wireProtocolToTestProtocol: Record<string, string> = {
+  openai_chat_completions: 'openai-chat',
+  openai_responses: 'openai-responses',
+  anthropic_messages: 'claude-messages',
+};
+
+export function TestCallModal({ account, onClose, onStatusUpdate }: TestCallModalProps) {
   const [models, setModels] = useState<UpstreamModel[]>([]);
   const [selectedModel, setSelectedModel] = useState('');
-  const [protocol, setProtocol] = useState('openai-chat');
+  const [protocol, setProtocol] = useState('auto');
   const [streaming, setStreaming] = useState(false);
   const [message, setMessage] = useState(DEFAULT_MESSAGE);
   const [loading, setLoading] = useState(false);
   const [modelError, setModelError] = useState('');
-  const [result, setResult] = useState<Record<string, unknown> | null>(null);
+  const [result, setResult] = useState<UpstreamTestCallResult | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -49,8 +63,16 @@ export function TestCallModal({ account, onClose }: TestCallModalProps) {
     };
   }, [account.id]);
 
+  const selectedModelInfo = useMemo(
+    () => models.find((item) => item.upstreamModelName === selectedModel || item.normalizedModelName === selectedModel),
+    [models, selectedModel]
+  );
+  const protocolOptions = useMemo(() => supportedTestProtocols(selectedModelInfo), [selectedModelInfo]);
+  const canSend = Boolean(selectedModel && protocolOptions.length > 0);
+  const protocolHint = protocolOptions.length > 0 ? '自动会按模型支持协议选择第一个可测试协议' : '该模型没有当前支持的测试协议';
+
   function handleReset() {
-    setProtocol('openai-chat');
+    setProtocol('auto');
     setStreaming(false);
     setMessage(DEFAULT_MESSAGE);
     setResult(null);
@@ -63,20 +85,18 @@ export function TestCallModal({ account, onClose }: TestCallModalProps) {
     setLoading(true);
     setResult(null);
     try {
-      const resp = await fetch(`/api/admin/upstreams/accounts/${account.id}/test-call`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ model_name: selectedModel, protocol, streaming, message }),
-      });
-      const data = (await resp.json().catch(() => ({}))) as Record<string, unknown>;
-      if (!resp.ok) {
-        setResult({ error: data.error ?? resp.statusText });
-        return;
-      }
+      const data = await adminApi.testUpstreamCall(account.id, { modelName: selectedModel, protocol, streaming, message });
       setResult(data);
+      onStatusUpdate?.(account.id, data.accountStatus);
     } catch (error) {
-      setResult({ error: error instanceof Error ? error.message : '测试请求失败' });
+      setResult({
+        id: account.id,
+        httpStatus: 0,
+        protocol,
+        ok: false,
+        message: error instanceof Error ? error.message : '测试请求失败',
+        latencyMs: 0,
+      });
     } finally {
       setLoading(false);
     }
@@ -89,7 +109,7 @@ export function TestCallModal({ account, onClose }: TestCallModalProps) {
         <div className="flex items-start justify-between gap-4 border-b border-line px-6 py-5">
           <div>
             <h2 className="text-lg font-semibold text-text">测试 API 调用</h2>
-            <p className="mt-1 text-sm text-muted">配置请求参数并发送测试调用，验证站点的接口可用性与响应详情</p>
+            <p className="mt-1 text-sm text-muted">按模型支持协议发送一次真实上游请求，只展示 HTTP 检测摘要</p>
           </div>
           <button type="button" onClick={onClose} className="shrink-0 text-muted hover:text-text" aria-label="关闭">
             <X className="h-5 w-5" />
@@ -98,27 +118,28 @@ export function TestCallModal({ account, onClose }: TestCallModalProps) {
 
         <div className="space-y-4 px-6 py-5">
           <Field label="站点">
-            <div className="rounded-lg border border-line bg-elevated px-3 py-2 text-sm text-muted">
-              {account.name} ({account.code})
-            </div>
+            <div className="rounded-lg border border-line bg-elevated px-3 py-2 text-sm text-muted">{account.name}</div>
           </Field>
 
           <Field label="模型" hint={modelError || '模型来自已同步的数据库记录；如果为空，请先执行全量刷新'} danger={Boolean(modelError)}>
-            <select className={inputClass} value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)}>
+            <select className={inputClass} value={selectedModel} onChange={(event) => setSelectedModel(event.target.value)}>
               {models.length === 0 && <option value="">暂无可用模型</option>}
-              {models.map((m) => (
-                <option key={m.id} value={m.upstreamModelName}>
-                  {m.displayName || m.upstreamModelName}
+              {models.map((model) => (
+                <option key={model.id} value={model.upstreamModelName}>
+                  {model.displayName || model.upstreamModelName}
                 </option>
               ))}
             </select>
           </Field>
 
-          <Field label="协议" hint="选择测试使用的请求协议">
-            <select className={inputClass} value={protocol} onChange={(e) => setProtocol(e.target.value)}>
-              <option value="openai-chat">OpenAI Chat</option>
-              <option value="claude-messages">Claude Messages</option>
-              <option value="openai-responses">OpenAI Responses</option>
+          <Field label="协议" hint={protocolHint} danger={protocolOptions.length === 0 && Boolean(selectedModel)}>
+            <select className={inputClass} value={protocol} onChange={(event) => setProtocol(event.target.value)} disabled={protocolOptions.length === 0}>
+              <option value="auto">自动</option>
+              {protocolOptions.map((item) => (
+                <option key={item} value={item}>
+                  {protocolLabels[item]}
+                </option>
+              ))}
             </select>
           </Field>
 
@@ -134,24 +155,26 @@ export function TestCallModal({ account, onClose }: TestCallModalProps) {
             </button>
           </Field>
 
-          <Field label="测试消息" hint="输入要发送给模型的测试消息内容">
-            <textarea className={inputClass} rows={3} placeholder={DEFAULT_MESSAGE} value={message} onChange={(e) => setMessage(e.target.value)} />
+          <Field label="测试消息">
+            <textarea className={inputClass} rows={3} placeholder={DEFAULT_MESSAGE} value={message} onChange={(event) => setMessage(event.target.value)} />
           </Field>
 
           {result && (
-            <div className="rounded-lg border border-line bg-elevated">
-              <div className="border-b border-line px-3 py-2 text-sm font-medium text-text">响应结果</div>
-              <pre className="max-h-64 overflow-auto p-3 text-xs text-muted">{JSON.stringify(result, null, 2)}</pre>
+            <div className={`rounded-lg border p-4 ${result.ok ? 'border-success/30 bg-success/10' : 'border-danger/30 bg-danger/10'}`}>
+              <div className={`text-sm font-medium ${result.ok ? 'text-success' : 'text-danger'}`}>{result.ok ? '测试成功' : '测试失败'}</div>
+              <div className="mt-3 grid grid-cols-2 gap-2 text-sm text-muted">
+                <span>HTTP：{result.httpStatus || '-'}</span>
+                <span>协议：{protocolLabels[result.protocol] ?? result.protocol}</span>
+                <span>延迟：{formatLatency(result.latencyMs || undefined)}</span>
+                <span>状态：{result.ok ? '成功' : '失败'}</span>
+              </div>
+              {result.message && <div className="mt-3 break-words text-sm text-muted">{result.message}</div>}
             </div>
           )}
         </div>
 
         <div className="flex items-center justify-between gap-3 border-t border-line px-6 py-4">
-          <button
-            type="button"
-            onClick={handleReset}
-            className="inline-flex items-center gap-2 rounded-lg border border-line px-4 py-2 text-sm font-medium text-text hover:bg-elevated"
-          >
+          <button type="button" onClick={handleReset} className="inline-flex items-center gap-2 rounded-lg border border-line px-4 py-2 text-sm font-medium text-text hover:bg-elevated">
             <RotateCcw className="h-4 w-4" />
             重置
           </button>
@@ -162,7 +185,7 @@ export function TestCallModal({ account, onClose }: TestCallModalProps) {
             <button
               type="button"
               onClick={handleTest}
-              disabled={loading || !selectedModel}
+              disabled={loading || !canSend}
               className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
             >
               <Send className="h-4 w-4" />
@@ -171,10 +194,24 @@ export function TestCallModal({ account, onClose }: TestCallModalProps) {
           </div>
         </div>
 
-        <div className="border-t border-line px-6 py-3 text-center text-xs text-muted">测试调用不写入 RelayDeck 统计；实际上游计费以平台规则为准</div>
+        <div className="border-t border-line px-6 py-3 text-center text-xs text-muted">测试调用会真实请求上游，计费以平台规则为准</div>
       </div>
     </>
   );
+}
+
+function supportedTestProtocols(model?: UpstreamModel): string[] {
+  if (!model) return [];
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const protocol of model.supportedWireProtocols) {
+    const mapped = wireProtocolToTestProtocol[protocol];
+    if (mapped && !seen.has(mapped)) {
+      seen.add(mapped);
+      result.push(mapped);
+    }
+  }
+  return result;
 }
 
 function Field({ label, hint, danger, children }: { label: string; hint?: string; danger?: boolean; children: React.ReactNode }) {
