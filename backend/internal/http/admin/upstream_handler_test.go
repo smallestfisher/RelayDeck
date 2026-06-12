@@ -291,6 +291,48 @@ func TestRefreshAllRoutesAreMounted(t *testing.T) {
 	}
 }
 
+func TestRefreshAllActionPersistsQuotaAndModels(t *testing.T) {
+	handler, sessions, adminStore, fakeStore := newUpstreamTestHandlerParts(t)
+	cookie := createTestSession(t, sessions, adminStore)
+	account := createStoredUpstreamAccount(t, fakeStore)
+	if err := fakeStore.UpsertUpstreamAccountStatus(domain.UpstreamAccountStatus{
+		UpstreamAccountID: account.ID,
+		APIStatus:         domain.UpstreamAPIStatusHealthy,
+		ModelCount:        7,
+		BalanceAmount:     2,
+		BalanceUnit:       "usd",
+		UpdatedAt:         fixedAdminNow(),
+	}); err != nil {
+		t.Fatalf("seed status: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/upstreams/accounts/"+account.ID+"/refresh-all", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected refresh-all 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var result actionResult
+	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+		t.Fatalf("decode action response: %v", err)
+	}
+	if result.AccountStatus == nil || result.AccountStatus.ModelCount != 1 || result.AccountStatus.BalanceAmount != 12 || result.AccountStatus.BalanceUnit != "quota" {
+		t.Fatalf("expected fresh quota and model status in response, got %+v", result.AccountStatus)
+	}
+	status, ok := fakeStore.UpstreamAccountStatus(account.ID)
+	if !ok {
+		t.Fatalf("expected stored status")
+	}
+	if status.ModelCount != 1 || status.BalanceAmount != 12 || status.BalanceUnit != "quota" {
+		t.Fatalf("expected fresh quota and model status in store, got %+v", status)
+	}
+	models := fakeStore.UpstreamModels(account.ID)
+	if len(models) != 1 || models[0].NormalizedModelName != "gpt-4o-mini" {
+		t.Fatalf("expected synced models, got %+v", models)
+	}
+}
+
 func TestUpstreamActionPersistsRotatedAccountCredential(t *testing.T) {
 	handler, sessions, adminStore, fakeStore := newUpstreamTestHandlerPartsWithAdapter(t, rotatingAccountAdapter{})
 	cookie := createTestSession(t, sessions, adminStore)

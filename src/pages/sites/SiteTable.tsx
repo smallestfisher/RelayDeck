@@ -2,7 +2,7 @@ import { Activity, BarChart3, CheckCircle2, Edit, KeyRound, RefreshCw, RotateCcw
 import { Button } from '../../components/ui/Button';
 import { DataTable, tableCellClass, tableHeadClass } from '../../components/ui/DataTable';
 import { StatusBadge } from '../../components/ui/StatusBadge';
-import { formatLatency, formatNumber } from '../../lib/format';
+import { formatCurrency, formatLatency, formatNumber } from '../../lib/format';
 import type { UpstreamAccount, UpstreamActionName } from '../../types';
 import { platformLabels } from './siteOptions';
 
@@ -100,7 +100,7 @@ export function SiteTable({
                 </span>
               </td>
               <td className={tableCellClass}>
-                {account.status.balanceUnit ? `${formatNumber(account.status.balanceAmount)} ${account.status.balanceUnit}` : '-'}
+                {formatBalance(account.status.balanceAmount, account.status.balanceUnit)}
               </td>
               <td className={tableCellClass}>
                 <div className="flex items-center gap-1.5">
@@ -117,6 +117,16 @@ export function SiteTable({
       </tbody>
     </DataTable>
   );
+}
+
+function formatBalance(amount: number, unit: string): string {
+  if (!unit) {
+    return '-';
+  }
+  if (unit.toLowerCase() === 'usd') {
+    return formatCurrency(amount);
+  }
+  return `${formatNumber(amount)} ${unit}`;
 }
 
 function IconButton({

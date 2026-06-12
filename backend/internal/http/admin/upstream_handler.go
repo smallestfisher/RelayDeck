@@ -350,7 +350,6 @@ func (h *Handler) runUpstreamAction(ctx context.Context, id string, action strin
 		}
 		return actionResult
 	case "refresh-all":
-		// Test account credential + refresh quota
 		finalStatus := domain.UpstreamAccountStatus{UpstreamAccountID: account.ID, UpdatedAt: h.now()}
 		var models []domain.UpstreamSyncedModel
 
@@ -359,12 +358,13 @@ func (h *Handler) runUpstreamAction(ctx context.Context, id string, action strin
 			if err == nil {
 				if updated, updateErr := h.applyCredentialUpdate(upstreams, account, testResult.CredentialUpdate); updateErr == nil {
 					account = updated
+					if testResult.CredentialUpdate != nil {
+						accountCredential = testResult.CredentialUpdate.Plaintext
+					}
 				}
 				finalStatus.AccountStatus = testResult.Status.AccountStatus
 				finalStatus.CheckinStatus = testResult.Status.CheckinStatus
 				finalStatus.LastAccountCheckedAt = testResult.Status.LastAccountCheckedAt
-				finalStatus.BalanceAmount = testResult.Status.BalanceAmount
-				finalStatus.BalanceUnit = testResult.Status.BalanceUnit
 				if testResult.Status.LastErrorClass != "" {
 					finalStatus.LastErrorClass = testResult.Status.LastErrorClass
 					finalStatus.LastErrorMessage = testResult.Status.LastErrorMessage
@@ -372,7 +372,33 @@ func (h *Handler) runUpstreamAction(ctx context.Context, id string, action strin
 			}
 		}
 
-		// Sync models
+		quotaResult, quotaErr := adapter.RefreshQuota(ctx, account, apiKey, accountCredential)
+		if quotaErr == nil {
+			if updated, updateErr := h.applyCredentialUpdate(upstreams, account, quotaResult.CredentialUpdate); updateErr != nil {
+				return actionResult{ID: id, Status: "failed", Message: updateErr.Error()}
+			} else {
+				account = updated
+			}
+			if quotaResult.Status.APIStatus != "" {
+				finalStatus.APIStatus = quotaResult.Status.APIStatus
+				finalStatus.LastAPICheckedAt = quotaResult.Status.LastAPICheckedAt
+			}
+			if quotaResult.Status.AccountStatus != "" {
+				finalStatus.AccountStatus = quotaResult.Status.AccountStatus
+				finalStatus.LastAccountCheckedAt = quotaResult.Status.LastAccountCheckedAt
+			}
+			finalStatus.BalanceAmount = quotaResult.Status.BalanceAmount
+			finalStatus.BalanceUnit = quotaResult.Status.BalanceUnit
+			if quotaResult.BalanceUnit != "" {
+				finalStatus.BalanceAmount = quotaResult.BalanceAmount
+				finalStatus.BalanceUnit = quotaResult.BalanceUnit
+			}
+			if quotaResult.Status.LastErrorClass != "" {
+				finalStatus.LastErrorClass = quotaResult.Status.LastErrorClass
+				finalStatus.LastErrorMessage = quotaResult.Status.LastErrorMessage
+			}
+		}
+
 		syncResult, syncStatus, syncErr := adapter.SyncModels(ctx, account, apiKey)
 		if syncErr == nil {
 			models = syncResult.Models
@@ -387,7 +413,7 @@ func (h *Handler) runUpstreamAction(ctx context.Context, id string, action strin
 			}
 		}
 
-		return h.storeActionStatus(upstreams, account, action, finalStatus, models, nil)
+		return h.storeActionStatus(upstreams, account, action, finalStatus, models, firstError(quotaErr, syncErr))
 	default:
 		return actionResult{ID: id, Status: "failed", Message: "unknown action"}
 	}
@@ -452,14 +478,14 @@ func mergeActionStatus(action string, existing domain.UpstreamAccountStatus, sta
 		status.CheckinStatus = existing.CheckinStatus
 		status.LastCheckinAt = existing.LastCheckinAt
 	}
-	if action != "test-api" && action != "sync-models" {
+	if action != "test-api" && action != "sync-models" && action != "refresh-all" {
 		status.ModelCount = existing.ModelCount
 		status.LastModelSyncedAt = existing.LastModelSyncedAt
 	}
 	if status.LatencyMS == 0 {
 		status.LatencyMS = existing.LatencyMS
 	}
-	if action != "refresh-quota" {
+	if action != "refresh-quota" && action != "refresh-all" {
 		status.BalanceAmount = existing.BalanceAmount
 		status.BalanceUnit = existing.BalanceUnit
 	}
@@ -691,6 +717,15 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func firstError(values ...error) error {
+	for _, value := range values {
+		if value != nil {
+			return value
+		}
+	}
+	return nil
 }
 
 type testCallRequest struct {
