@@ -75,6 +75,7 @@ func (h *Handler) mountUpstreamRoutes(mux *http.ServeMux) {
 	mux.Handle("POST /api/admin/upstreams/accounts/{id}/sync-models", h.requireAdmin(http.HandlerFunc(h.handleUpstreamAction)))
 	mux.Handle("POST /api/admin/upstreams/accounts/{id}/refresh-quota", h.requireAdmin(http.HandlerFunc(h.handleUpstreamAction)))
 	mux.Handle("POST /api/admin/upstreams/accounts/{id}/checkin", h.requireAdmin(http.HandlerFunc(h.handleUpstreamAction)))
+	mux.Handle("POST /api/admin/upstreams/accounts/{id}/refresh-all", h.requireAdmin(http.HandlerFunc(h.handleUpstreamAction)))
 	mux.Handle("POST /api/admin/upstreams/accounts/{id}/test-call", h.requireAdmin(http.HandlerFunc(h.handleTestCall)))
 	mux.Handle("GET /api/admin/upstreams/accounts/{id}/models", h.requireAdmin(http.HandlerFunc(h.handleUpstreamModels)))
 	mux.Handle("GET /api/admin/upstreams/accounts/{id}/events", h.requireAdmin(http.HandlerFunc(h.handleUpstreamEvents)))

@@ -268,6 +268,29 @@ func TestUpstreamActionResponseIncludesAccountStatusSnapshot(t *testing.T) {
 	}
 }
 
+func TestRefreshAllRoutesAreMounted(t *testing.T) {
+	handler, sessions, adminStore, fakeStore := newUpstreamTestHandlerParts(t)
+	cookie := createTestSession(t, sessions, adminStore)
+	account := createStoredUpstreamAccount(t, fakeStore)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/upstreams/accounts/"+account.ID+"/refresh-all", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected single refresh-all 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	batchReq := httptest.NewRequest(http.MethodPost, "/api/admin/upstreams/accounts/batch/refresh-all", strings.NewReader(`{"ids":["`+account.ID+`"]}`))
+	batchReq.Header.Set("Content-Type", "application/json")
+	batchReq.AddCookie(cookie)
+	batchRec := httptest.NewRecorder()
+	handler.ServeHTTP(batchRec, batchReq)
+	if batchRec.Code != http.StatusOK {
+		t.Fatalf("expected batch refresh-all 200, got %d: %s", batchRec.Code, batchRec.Body.String())
+	}
+}
+
 func TestUpstreamActionPersistsRotatedAccountCredential(t *testing.T) {
 	handler, sessions, adminStore, fakeStore := newUpstreamTestHandlerPartsWithAdapter(t, rotatingAccountAdapter{})
 	cookie := createTestSession(t, sessions, adminStore)
