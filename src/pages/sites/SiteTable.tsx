@@ -83,11 +83,11 @@ export function SiteTable({
               <td className={tableCellClass}>
                 <StatusBadge status={account.status.accountStatus} />
               </td>
-              <td className={tableCellClass}>{formatNumber(account.status.modelCount)}</td>
+              <td className={tableCellClass}>{formatModelCount(account.status.modelCount, account.status.lastModelSyncedAt)}</td>
               <td className={tableCellClass}>
                 <span
                   className={
-                    account.status.latencyMs == null
+                    !account.status.lastApiCheckedAt
                       ? ''
                       : account.status.latencyMs < 200
                         ? 'text-green-500'
@@ -96,7 +96,7 @@ export function SiteTable({
                           : 'text-red-500'
                   }
                 >
-                  {formatLatency(account.status.latencyMs || undefined)}
+                  {formatStatusLatency(account.status.latencyMs, account.status.lastApiCheckedAt)}
                 </span>
               </td>
               <td className={tableCellClass}>
@@ -127,6 +127,14 @@ function formatBalance(amount: number, unit: string): string {
     return formatCurrency(amount);
   }
   return `${formatNumber(amount)} ${unit}`;
+}
+
+function formatModelCount(modelCount: number, lastModelSyncedAt?: string): string {
+  return lastModelSyncedAt ? formatNumber(modelCount) : '-';
+}
+
+function formatStatusLatency(latencyMs: number, lastApiCheckedAt?: string): string {
+  return lastApiCheckedAt ? formatLatency(latencyMs) : '-';
 }
 
 function IconButton({

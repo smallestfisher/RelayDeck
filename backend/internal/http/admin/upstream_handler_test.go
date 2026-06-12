@@ -72,6 +72,21 @@ func TestCreateListAndUpdateUpstreamAccountRedactsSecrets(t *testing.T) {
 	if stored.APIKeyPrefix != "sk-test" {
 		t.Fatalf("expected api key prefix, got %q", stored.APIKeyPrefix)
 	}
+	var created struct {
+		Status domain.UpstreamAccountStatus `json:"status"`
+	}
+	if err := json.Unmarshal(createRec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode created account: %v", err)
+	}
+	if created.Status.APIStatus != domain.UpstreamAPIStatusUnknown || created.Status.AccountStatus != domain.AccountCredentialStatusActionRequired {
+		t.Fatalf("expected new account to start unknown/action_required, got %+v", created.Status)
+	}
+	if created.Status.ModelCount != 0 || created.Status.LatencyMS != 0 || created.Status.BalanceUnit != "" {
+		t.Fatalf("expected new account metrics to be unset, got %+v", created.Status)
+	}
+	if !created.Status.LastAPICheckedAt.IsZero() || !created.Status.LastModelSyncedAt.IsZero() {
+		t.Fatalf("expected new account timestamps to be unset, got %+v", created.Status)
+	}
 
 	listReq := httptest.NewRequest(http.MethodGet, "/api/admin/upstreams/accounts", nil)
 	listReq.AddCookie(cookie)
@@ -333,6 +348,44 @@ func TestRefreshAllActionPersistsQuotaAndModels(t *testing.T) {
 	}
 }
 
+func TestRefreshAllKeepsCredentialStatusSeparateFromQuotaAndUsesAPIResult(t *testing.T) {
+	handler, sessions, adminStore, fakeStore := newUpstreamTestHandlerPartsWithAdapter(t, quotaHealthySyncFailedAdapter{})
+	cookie := createTestSession(t, sessions, adminStore)
+	account := createStoredUpstreamAccount(t, fakeStore)
+	if err := fakeStore.UpsertUpstreamAccountStatus(domain.UpstreamAccountStatus{
+		UpstreamAccountID: account.ID,
+		APIStatus:         domain.UpstreamAPIStatusUnknown,
+		AccountStatus:     domain.AccountCredentialStatusActionRequired,
+		UpdatedAt:         fixedAdminNow(),
+	}); err != nil {
+		t.Fatalf("seed status: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/upstreams/accounts/"+account.ID+"/refresh-all", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected refresh-all 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var result actionResult
+	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+		t.Fatalf("decode action response: %v", err)
+	}
+	if result.AccountStatus == nil {
+		t.Fatalf("expected status snapshot")
+	}
+	if result.AccountStatus.APIStatus != domain.UpstreamAPIStatusFailed {
+		t.Fatalf("expected API status from API/model test, got %+v", result.AccountStatus)
+	}
+	if result.AccountStatus.AccountStatus != domain.AccountCredentialStatusActionRequired {
+		t.Fatalf("expected quota refresh not to overwrite credential status, got %+v", result.AccountStatus)
+	}
+	if result.AccountStatus.BalanceAmount != 12 || result.AccountStatus.BalanceUnit != "usd" {
+		t.Fatalf("expected quota to be refreshed, got %+v", result.AccountStatus)
+	}
+}
+
 func TestUpstreamActionPersistsRotatedAccountCredential(t *testing.T) {
 	handler, sessions, adminStore, fakeStore := newUpstreamTestHandlerPartsWithAdapter(t, rotatingAccountAdapter{})
 	cookie := createTestSession(t, sessions, adminStore)
@@ -510,6 +563,37 @@ func (rotatingAccountAdapter) TestAccountCredential(context.Context, domain.Upst
 			Plaintext: `{"refresh_token":"rt_new"}`,
 		},
 	}, nil
+}
+
+type quotaHealthySyncFailedAdapter struct {
+	fakeAccountAdapter
+}
+
+func (quotaHealthySyncFailedAdapter) SyncModels(context.Context, domain.UpstreamAccount, string) (domain.ModelSyncResult, domain.UpstreamAccountStatus, error) {
+	return domain.ModelSyncResult{AccountID: "acct"},
+		domain.UpstreamAccountStatus{
+			APIStatus:         domain.UpstreamAPIStatusFailed,
+			AccountStatus:     domain.AccountCredentialStatusNotConfigured,
+			CheckinStatus:     domain.CheckinStatusUnsupported,
+			ModelCount:        0,
+			LatencyMS:         321,
+			LastAPICheckedAt:  fixedAdminNow(),
+			LastErrorClass:    domain.UpstreamErrorAuthError,
+			LastErrorMessage:  "api test failed",
+			LastModelSyncedAt: fixedAdminNow(),
+		}, nil
+}
+
+func (quotaHealthySyncFailedAdapter) RefreshQuota(context.Context, domain.UpstreamAccount, string, string) (domain.QuotaRefreshResult, error) {
+	status := domain.UpstreamAccountStatus{
+		APIStatus:            domain.UpstreamAPIStatusHealthy,
+		AccountStatus:        domain.AccountCredentialStatusNotConfigured,
+		BalanceAmount:        12,
+		BalanceUnit:          "usd",
+		LastAPICheckedAt:     fixedAdminNow(),
+		LastAccountCheckedAt: fixedAdminNow(),
+	}
+	return domain.QuotaRefreshResult{Status: status, BalanceAmount: 12, BalanceUnit: "usd"}, nil
 }
 
 type fakeUpstreamStore struct {

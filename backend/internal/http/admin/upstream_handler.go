@@ -379,14 +379,6 @@ func (h *Handler) runUpstreamAction(ctx context.Context, id string, action strin
 			} else {
 				account = updated
 			}
-			if quotaResult.Status.APIStatus != "" {
-				finalStatus.APIStatus = quotaResult.Status.APIStatus
-				finalStatus.LastAPICheckedAt = quotaResult.Status.LastAPICheckedAt
-			}
-			if quotaResult.Status.AccountStatus != "" {
-				finalStatus.AccountStatus = quotaResult.Status.AccountStatus
-				finalStatus.LastAccountCheckedAt = quotaResult.Status.LastAccountCheckedAt
-			}
 			finalStatus.BalanceAmount = quotaResult.Status.BalanceAmount
 			finalStatus.BalanceUnit = quotaResult.Status.BalanceUnit
 			if quotaResult.BalanceUnit != "" {
@@ -675,14 +667,10 @@ func defaultStatusForAccount(account domain.UpstreamAccount) domain.UpstreamAcco
 	if !account.Enabled {
 		apiStatus = domain.UpstreamAPIStatusDisabled
 	}
-	accountStatus := domain.AccountCredentialStatusNotConfigured
-	if account.HasAccountCredential() {
-		accountStatus = domain.AccountCredentialStatusValid
-	}
 	return domain.UpstreamAccountStatus{
 		UpstreamAccountID: account.ID,
 		APIStatus:         apiStatus,
-		AccountStatus:     accountStatus,
+		AccountStatus:     domain.AccountCredentialStatusActionRequired,
 		CheckinStatus:     domain.CheckinStatusUnsupported,
 	}
 }

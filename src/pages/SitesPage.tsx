@@ -436,8 +436,8 @@ export function SitesPage() {
               <div className="font-medium text-text">{inspectAccount.baseUrl}</div>
               <div className="mt-2 grid grid-cols-2 gap-2">
                 <span>API：{inspectAccount.status.apiStatus}</span>
-                <span>延迟：{formatLatency(inspectAccount.status.latencyMs || undefined)}</span>
-                <span>模型：{formatNumber(inspectAccount.status.modelCount)}</span>
+                <span>延迟：{formatDetailLatency(inspectAccount.status.latencyMs, inspectAccount.status.lastApiCheckedAt)}</span>
+                <span>模型：{formatDetailModelCount(inspectAccount.status.modelCount, inspectAccount.status.lastModelSyncedAt)}</span>
                 <span>账号：{inspectAccount.status.accountStatus}</span>
               </div>
             </div>
@@ -470,6 +470,14 @@ function latencyMatches(latencyMs: number, band: LatencyBand): boolean {
   if (band === 'medium') return latencyMs >= 300 && latencyMs <= 1000;
   if (band === 'high') return latencyMs > 1000;
   return true;
+}
+
+function formatDetailLatency(latencyMs: number, lastApiCheckedAt?: string): string {
+  return lastApiCheckedAt ? formatLatency(latencyMs) : '-';
+}
+
+function formatDetailModelCount(modelCount: number, lastModelSyncedAt?: string): string {
+  return lastModelSyncedAt ? formatNumber(modelCount) : '-';
 }
 
 function batchSummary(results: UpstreamActionResult[]): string {

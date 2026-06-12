@@ -281,15 +281,22 @@ function mapUpstreamStatus(raw: RawUpstreamStatus): UpstreamAccountStatusSnapsho
     latencyMs: raw.latency_ms ?? raw.LatencyMS ?? 0,
     balanceAmount: raw.balance_amount ?? raw.BalanceAmount ?? 0,
     balanceUnit: raw.balance_unit ?? raw.BalanceUnit ?? '',
-    lastApiCheckedAt: raw.last_api_checked_at ?? raw.LastAPICheckedAt,
-    lastAccountCheckedAt: raw.last_account_checked_at ?? raw.LastAccountCheckedAt,
-    lastModelSyncedAt: raw.last_model_synced_at ?? raw.LastModelSyncedAt,
-    lastCheckinAt: raw.last_checkin_at ?? raw.LastCheckinAt,
+    lastApiCheckedAt: normalizeTimestamp(raw.last_api_checked_at ?? raw.LastAPICheckedAt),
+    lastAccountCheckedAt: normalizeTimestamp(raw.last_account_checked_at ?? raw.LastAccountCheckedAt),
+    lastModelSyncedAt: normalizeTimestamp(raw.last_model_synced_at ?? raw.LastModelSyncedAt),
+    lastCheckinAt: normalizeTimestamp(raw.last_checkin_at ?? raw.LastCheckinAt),
     lastErrorClass: raw.last_error_class ?? raw.LastErrorClass,
     lastErrorMessage: raw.last_error_message ?? raw.LastErrorMessage,
     actionRequiredReason: raw.action_required_reason ?? raw.ActionRequiredReason,
     updatedAt: raw.updated_at ?? raw.UpdatedAt,
   };
+}
+
+function normalizeTimestamp(value?: string): string | undefined {
+  if (!value || value.startsWith('0001-01-01')) {
+    return undefined;
+  }
+  return value;
 }
 
 function mapUpstreamModel(raw: RawUpstreamModel): UpstreamModel {
